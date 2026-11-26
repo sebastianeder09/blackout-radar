@@ -280,7 +280,8 @@ def main(argv: list[str] | None = None) -> int:
     sim.set_defaults(func=cmd_simulate)
 
     diag = sub.add_parser("probe", help="Diagnose: jede Datenquelle einmal roh abfragen")
-    diag.add_argument("--only", help="nur diese Quellen, mit Komma getrennt (load,frequency,news,utility,ioda,ntfy)")
+    diag.add_argument("--only", help="nur diese Quellen, mit Komma getrennt (load,frequency,news,utility,ioda,ntfy). "
+                                     "replay spielt die Lastauswertung an echten Tagen nach")
     diag.set_defaults(func=cmd_probe)
 
     args = parser.parse_args(argv)

@@ -6,15 +6,29 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 
 USER_AGENT = "blackout-radar/0.1 (privater Stromausfall-Monitor)"
 
 
 class HttpError(Exception):
-    def __init__(self, message: str, status: int | None = None, retry_after: str | None = None):
+    def __init__(self, message: str, status: int | None = None, retry_after: str | None = None,
+                 headers: dict | None = None, body: str = ""):
         super().__init__(message)
         self.status = status
         self.retry_after = retry_after
+        self.headers = headers or {}
+        self.body = body  # Anfang der Fehlerantwort, nur für die Diagnose
+
+
+def _error_text(err) -> str:
+    try:
+        raw = err.read(65536)
+        if (err.headers.get("Content-Encoding") or "").lower() == "gzip":
+            raw = gzip.decompress(raw)
+    except (OSError, EOFError, zlib.error):
+        return ""
+    return " ".join(raw.decode("utf-8", errors="replace").split())[:300]
 
 
 def request(url: str, *, params: dict | None = None, data: bytes | None = None,
@@ -33,8 +47,9 @@ def request(url: str, *, params: dict | None = None, data: bytes | None = None,
                 body = gzip.decompress(body)
             return resp.status, dict(resp.headers), body
     except urllib.error.HTTPError as err:
-        retry_after = err.headers.get("Retry-After") if err.headers else None
-        raise HttpError(f"HTTP {err.code} von {host}", status=err.code, retry_after=retry_after) from None
+        head = dict(err.headers) if err.headers else {}
+        raise HttpError(f"HTTP {err.code} von {host}", status=err.code, retry_after=head.get("Retry-After"),
+                        headers=head, body=_error_text(err)) from None
     except (urllib.error.URLError, TimeoutError, OSError) as err:
         reason = getattr(err, "reason", err)
         raise HttpError(f"{host} nicht erreichbar ({reason})") from None

@@ -385,10 +385,12 @@ class Engine:
         """Wahr, wenn nur die (verzögerten) Lastdaten anschlagen und das für eine Meldung nicht reicht.
 
         Lastdaten allein sind anfällig für Feiertage und unvollständige Meldungen. Sie reichen
-        deshalb nur bei einem massiven, anhaltenden Einbruch in einem Vorrang-Gebiet.
+        deshalb nur bei einem massiven, anhaltenden Einbruch in einem Vorrang-Gebiet. Einzelne
+        Schlagzeilen aus demselben Land ändern daran nichts (irgendwo fällt immer der Strom aus),
+        es braucht eine zweite Quelle oder eine Medienlage, die für sich allein zählt.
         """
         incidents = list(event["incidents"].values())
-        if any(set(i["sources"]) - {"load"} or "Medien" in i["confirmed_by"] for i in incidents):
+        if any(set(i["sources"]) - {"load"} for i in incidents):
             return False
         minimum = timedelta(minutes=self.f["load_alone_min_minutes"])
         for inc in incidents:

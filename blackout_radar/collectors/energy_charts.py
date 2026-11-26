@@ -31,15 +31,22 @@ def area_code(country: str) -> str:
     return "GB" if country.lower() == "uk" else country.upper()
 
 
-def fetch_load(base: str, country: str, now) -> list:
-    doc = http.get_json(f"{base}/v2/public_power", timeout=30, params={
-        "country": country, "start": _fmt(now - timedelta(hours=58)), "end": _fmt(now)})
+def to_points(doc: dict) -> list:
+    """Lastwerte einer Antwort als [Zeit, MW], nach Zeit geordnet. Fehlende Werte (leer oder 0) entfallen."""
     points = []
     for row in doc.get("data") or []:
         value = (row.get("values") or {}).get("load")
         when = parse_ts(row.get("timestamp"))
-        if value and when is not None and float(value) > 0:  # 0 steht für fehlende Werte
+        if value and when is not None and float(value) > 0:
             points.append([iso(when), float(value)])
+    points.sort()
+    return points
+
+
+def fetch_load(base: str, country: str, now) -> list:
+    doc = http.get_json(f"{base}/v2/public_power", timeout=30, params={
+        "country": country, "start": _fmt(now - timedelta(hours=58)), "end": _fmt(now)})
+    points = to_points(doc)
     if not points:
         raise HttpError(f"keine Lastdaten für {country}")
     return points

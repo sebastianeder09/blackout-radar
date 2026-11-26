@@ -100,7 +100,7 @@ Alle Schwellen stehen in [`config.toml`](config.toml), jeweils mit Erklärung. O
 
 | Quelle | Liefert | Verzögerung | Stand der Prüfung |
 |---|---|---|---|
-| Netzfrequenz (Energy-Charts, Ersatz: netzfrequenzmessung.de) | Frequenz im Verbundnetz Kontinentaleuropa, sekundengenau | 1 bis 2 Minuten | live geprüft |
+| Netzfrequenz (Energy-Charts, Ersatz: netzfrequenzmessung.de, laut Anbieter nur für privaten Gebrauch) | Frequenz im Verbundnetz Kontinentaleuropa, sekundengenau | 1 bis 2 Minuten | live geprüft |
 | Stromlast (Energy-Charts, Daten von ENTSO-E) | Verbrauch je Land für Österreich und 11 weitere Länder | 2 bis 3 Stunden | live geprüft |
 | Medien (Google News) | Schlagzeilen in 6 Sprachen, gezielte Suchen für Oberösterreich und Österreich | je nach Berichterstattung, geschätzt 15 bis 90 Minuten | live geprüft |
 | Störmeldungen LINZ NETZ | öffentliche Störungsseite, zählt für Oberösterreich | wenige Minuten | Seite wird gelesen, eine echte Störung war beim Einrichten nicht aktiv |

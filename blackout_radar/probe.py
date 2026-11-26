@@ -1,6 +1,7 @@
 """Diagnose: fragt jede Datenquelle einmal roh ab und zeigt, was zurückkommt.
 
 Aufruf:  python -m blackout_radar probe [--only load,frequency,news,utility,ioda,ntfy]
+         python -m blackout_radar probe --only replay   Lastauswertung an echten Tagen nachspielen
 
 Gedacht zum Einrichten und für den Fall, dass eine Quelle ihr Format ändert.
 Es werden nur die festen Adressen der Datenquellen abgefragt, nichts wird gespeichert
@@ -16,7 +17,7 @@ import xml.etree.ElementTree as ET
 from datetime import timedelta
 
 from . import gazetteer, http
-from .collectors import linznetz, news
+from .collectors import energy_charts, linznetz, news
 from .http import HttpError
 from .model import fmt_number, iso, parse_ts
 
@@ -39,16 +40,32 @@ def _fmt(when) -> str:
     return when.strftime("%Y-%m-%dT%H:%MZ")
 
 
-def _fetch(url: str, params: dict | None = None, timeout: float = 30) -> str | None:
+def _limits(head: dict) -> str:
+    """Was der Dienst zur Begrenzung der Abfragen mitschickt."""
+    return ", ".join(f"{key}: {value}" for key, value in head.items() if re.search(r"ratelimit|retry", key, re.I))
+
+
+def _fetch(url: str, params: dict | None = None, timeout: float = 30, patient: bool = False) -> str | None:
+    """Holt eine Adresse. Mit patient=True wird nach "zu viele Abfragen" gewartet und zweimal wiederholt."""
     shown = url + ("?" + "&".join(f"{k}={v}" for k, v in params.items()) if params else "")
-    print(f"  GET {shown}")
-    try:
-        status, head, body = http.request(url, params=params, timeout=timeout)
-    except HttpError as err:
-        print(f"  FEHLER: {err}")
-        return None
-    print(f"  HTTP {status}, {head.get('Content-Type', '?')}, {len(body)} Bytes")
-    return body.decode("utf-8", errors="replace")
+    for attempt in range(3 if patient else 1):
+        print(f"  GET {shown}")
+        try:
+            status, head, body = http.request(url, params=params, timeout=timeout)
+        except HttpError as err:
+            print(f"  FEHLER: {err}" + (f" | Antwort: {err.body}" if err.body else ""))
+            if _limits(err.headers):
+                print(f"  Begrenzung: {_limits(err.headers)}")
+            if err.status != 429 or attempt == 2 or not patient:
+                return None
+            wait = min(60, int(err.retry_after)) if (err.retry_after or "").isdigit() else 20
+            print(f"  warte {wait} s und frage noch einmal")
+            time.sleep(wait)
+            continue
+        print(f"  HTTP {status}, {head.get('Content-Type', '?')}, {len(body)} Bytes"
+              + (f", Begrenzung: {_limits(head)}" if _limits(head) else ""))
+        return body.decode("utf-8", errors="replace")
+    return None
 
 
 def _json(text: str | None):
@@ -71,33 +88,124 @@ def _flatten(node) -> list:
 
 
 # ------------------------------------------------------------------ Stromlast
+# Nachbarländer, deren Lastdaten bei der Prüfung unvollständig oder nicht abrufbar waren. Die Diagnose
+# zeigt sie weiter an, damit sich später beurteilen lässt, ob sie in die Überwachung dürfen.
+LOAD_CANDIDATES = ["it", "ch", "si"]
+
 def probe_load(cfg: dict, now) -> None:
-    """Zeigt je Land die neuesten Lastwerte und den Wert vom Vortag. Unvollständige Meldungen fallen so auf."""
+    """Zeigt je Land die neuesten Lastwerte neben denen vom Vortag. Unvollständige Meldungen fallen so auf."""
     section = cfg["sources"]["load"]
     base = section["base_url"].rstrip("/")
-    for index, country in enumerate(section["countries"]):
+    countries = list(section["countries"]) + [c for c in LOAD_CANDIDATES if c not in section["countries"]]
+    for index, country in enumerate(countries):
         if index:
             time.sleep(4)  # der Dienst begrenzt schnelle Abfragen
         doc = _json(_fetch(f"{base}/v2/public_power", {
-            "country": country, "start": _fmt(now - timedelta(hours=30)), "end": _fmt(now)}))
+            "country": country, "start": _fmt(now - timedelta(hours=30)), "end": _fmt(now)}, patient=True))
         if not isinstance(doc, dict):
             continue
         rows = doc.get("data") or []
-        known = [(parse_ts(row.get("timestamp")), (row.get("values") or {}).get("load")) for row in rows]
-        known = [(when, value) for when, value in known if when and value]
+        known = [(parse_ts(row.get("timestamp")), (row.get("values") or {}).get("load"), row.get("values") or {})
+                 for row in rows]
+        known = [(when, value, values) for when, value, values in known if when and value]
         if index == 0:  # das erste Land ausführlich
             print("  Kopf:", {k: v for k, v in doc.items() if k not in ("data", "series")})
-            print("  Reihen:", outline(doc.get("series"), limit=2))
+            print("  Reihen:", [item.get("id") for item in doc.get("series") or [] if isinstance(item, dict)])
         if not known:
             print(f"  {country}: KEINE Lastwerte in {len(rows)} Zeilen")
             continue
-        lookup = dict(known)
-        last_time, last_value = known[-1]
-        values = [value for _, value in known]
-        print(f"  {country}: {len(known)} Werte, kleinster {min(values):.0f}, größter {max(values):.0f} MW, "
-              f"Verzögerung {now - last_time}")
-        print("    neueste:", ", ".join(f"{when.strftime('%H:%M')} {value:.0f}" for when, value in known[-6:]),
-              "| Vortag zur selben Zeit:", lookup.get(last_time - timedelta(days=1)))
+        lookup = {when: value for when, value, _ in known}
+        last_time, last_value, last_row = known[-1]
+        loads = [value for _, value, _ in known]
+        used = "" if country in section["countries"] else " (nur Diagnose, nicht überwacht)"
+        print(f"  {country}{used}: {len(known)} Werte, Raster {doc.get('interval_minutes')} min, "
+              f"kleinster {min(loads):.0f}, größter {max(loads):.0f} MW, Verzögerung {now - last_time}")
+
+        def beside(when, value, lookup=lookup):
+            ref = lookup.get(when - timedelta(days=1))
+            return f"{when.strftime('%H:%M')} {value:.0f} ({f'{ref:.0f}' if ref else '?'})"
+
+        print("    neueste (Vortag):", ", ".join(beside(when, value) for when, value, _ in known[-8:]))
+        ref = lookup.get(last_time - timedelta(days=1))
+        if ref and abs(last_value / ref - 1) >= 0.15:
+            before = next((values for when, _, values in known if when == last_time - timedelta(days=1)), {})
+            print(f"    AUFFÄLLIG: letzter Wert {last_value / ref - 1:+.0%} gegenüber dem Vortag")
+            print("    alle Reihen jetzt: ", json.dumps(last_row, ensure_ascii=False))
+            print("    alle Reihen Vortag:", json.dumps(before, ensure_ascii=False))
+
+
+# ------------------------------------------------------------------ Rückblick
+# Echte Zeiträume, an denen sich die Lastauswertung messen lässt: ein Stromausfall und ruhige Tage
+# mit Wochenenden und Feiertagen, an denen sie nichts melden darf. None steht für "die letzten 14 Tage".
+REPLAYS = [
+    ("es", "2025-04-25T00:00Z", "2025-04-30T12:00Z", "Stromausfall Iberische Halbinsel, 28.04.2025"),
+    ("pt", "2025-04-25T00:00Z", "2025-04-30T12:00Z", "Stromausfall Iberische Halbinsel, 28.04.2025"),
+    ("at", None, None, "die letzten 14 Tage, Normalbetrieb"),
+    ("at", "2026-04-27T00:00Z", "2026-05-05T00:00Z", "Woche mit Feiertag am Freitag, 01.05.2026"),
+    ("at", "2025-12-27T00:00Z", "2026-01-08T00:00Z", "Jahreswechsel mit Feiertagen am 01.01. und 06.01.2026"),
+    ("de", None, None, "die letzten 14 Tage, Normalbetrieb"),
+]
+
+
+def replay(country: str, points: list, section: dict, lead_hours: int = 48) -> list:
+    """Geht eine Lastreihe Punkt für Punkt durch, so wie der Monitor sie nach und nach gesehen hätte.
+
+    Liefert je Schritt mit Befund (Zeit des neuesten Werts, Signal).
+    """
+    events, found = {}, []
+    times = [parse_ts(stamp) for stamp, _ in points]
+    begin = times[0] + timedelta(hours=lead_hours)
+    first = 0
+    for index, when in enumerate(times):
+        if when < begin:
+            continue
+        while times[first] < when - timedelta(hours=58):
+            first += 1
+        for signal in energy_charts.analyse(country, points[first: index + 1], events, section,
+                                            when + timedelta(hours=2)):
+            found.append((when, signal))
+    return found
+
+
+def probe_replay(cfg: dict, now) -> None:
+    section = cfg["sources"]["load"]
+    base = section["base_url"].rstrip("/")
+    for index, (country, start, end, label) in enumerate(REPLAYS):
+        if index:
+            time.sleep(6)
+        print(f"\n  --- {country}: {label}")
+        doc = _json(_fetch(f"{base}/v2/public_power", {
+            "country": country, "start": start or _fmt(now - timedelta(days=14)), "end": end or _fmt(now)},
+            timeout=60, patient=True))
+        if not isinstance(doc, dict):
+            continue
+        rows = doc.get("data") or []
+        points = energy_charts.to_points(doc)
+        if len(points) < 200:
+            print(f"  zu wenige Lastwerte: {len(points)} in {len(rows)} Zeilen")
+            continue
+        step = int(doc.get("interval_minutes") or 15)
+        lookup = {parse_ts(stamp): value for stamp, value in points}
+        first, last = parse_ts(points[0][0]), parse_ts(points[-1][0])
+        grid, when = [], first
+        while when <= last:
+            value = lookup.get(when)
+            grid.append(None if value is None else round(value))
+            when += timedelta(minutes=step)
+        gaps = [iso(first + timedelta(minutes=step * i)) for i, value in enumerate(grid) if value is None]
+        print(f"  {len(points)} Werte im Raster {step} min von {iso(first)} bis {iso(last)}, "
+              f"{len(gaps)} Lücken" + (f", erste: {gaps[:6]}" if gaps else ""))
+        print("  REIHE", json.dumps({"country": country, "start": iso(first), "step_min": step, "load": grid},
+                                    separators=(",", ":")))
+        found = replay(country, points, section)
+        if not found:
+            print("  Auswertung: kein Befund im ganzen Zeitraum")
+            continue
+        print(f"  Auswertung: {len(found)} Schritte mit Befund")
+        for when, signal in found:
+            print(f"    {iso(when)} {'AKTIV' if signal.active else 'ENDE '} {signal.severity:5.0%} "
+                  f"Beginn {iso(signal.started_at)}"
+                  + (f" Ende {iso(signal.ended_at)}" if signal.ended_at else "") + f" | {signal.detail}")
 
 
 # --------------------------------------------------------------- Netzfrequenz
@@ -242,13 +350,20 @@ PROBES = {
 }
 
 
+# Läuft nur auf ausdrücklichen Wunsch (--only), weil es mehrere große Abfragen braucht.
+EXTRAS = {
+    "replay": ("Rückblick: Lastauswertung an echten Tagen", probe_replay),
+}
+
+
 def run(cfg: dict, now, only: list[str] | None = None) -> None:
-    unknown = sorted(set(only or []) - set(PROBES))
+    known = {**PROBES, **EXTRAS}
+    unknown = sorted(set(only or []) - set(known))
     if unknown:
-        print(f"Unbekannte Quelle: {', '.join(unknown)}. Möglich sind: {', '.join(PROBES)}")
+        print(f"Unbekannte Quelle: {', '.join(unknown)}. Möglich sind: {', '.join(known)}")
     print(f"Diagnose der Datenquellen, {iso(now)}")
-    for name, (label, func) in PROBES.items():
-        if only and name not in only:
+    for name, (label, func) in known.items():
+        if name not in (only or PROBES):
             continue
         print(f"\n===== {label} =====")
         try:

@@ -229,6 +229,26 @@ class LoadData(unittest.TestCase):
         sent = play(self.engine, lambda minute, now: [load("CZ", 0.8, at(-240), now - timedelta(minutes=135))], 180)
         self.assertEqual(sent, [])
 
+    def test_single_headlines_do_not_turn_a_drop_into_an_outage(self):
+        # Lokale Ausfälle gibt es in jedem Land täglich. Zwei Schlagzeilen belegen keinen landesweiten Einbruch.
+        def script(minute, now):
+            signals = [load("DE", 0.3, at(-240), now - timedelta(minutes=135))]
+            if minute == 10:
+                signals += [Signal("news", "news", "DE", observed_at=now, active=False, detail=title,
+                                   url=f"https://{domain}/1", metrics={"domain": domain, "power": True, "lead": True})
+                            for title, domain in (("Stromausfall in Berlin-Köpenick", "a.example"),
+                                                  ("Stromausfall in München-Schwabing", "b.example"))]
+            return signals
+
+        self.assertEqual(play(self.engine, script, 180), [])
+
+    def test_drop_with_a_media_story_is_reported(self):
+        def script(minute, now):
+            return [load("DE", 0.3, at(-240), now - timedelta(minutes=135)), media("DE", 0.2, at(-200), now)]
+
+        sent = play(self.engine, script, 30)
+        self.assertEqual(titles(sent)[:1], ["Großer Stromausfall: Deutschland"])
+
     def test_media_story_lingering_after_measured_end_opens_nothing_new(self):
         def script(minute, now):
             signals = [media("AT", 0.5, at(-20), now)]

@@ -150,9 +150,23 @@ class LoadAnalysis(unittest.TestCase):
     def test_normal_load_gives_no_signal(self):
         self.assertEqual(energy_charts.analyse("at", load_series(self.newest), self.events, self.cfg, at(0)), [])
 
-    def test_single_low_point_is_not_enough(self):
-        series = load_series(self.newest, dropped=1, drop=0.5)
+    def test_newest_values_are_provisional(self):
+        """Die neuesten Werte sind oft erst zum Teil gemeldet (gesehen bei Italien und Slowenien)."""
+        for dropped in (1, 2, 3):
+            series = load_series(self.newest, dropped=dropped, drop=0.8)
+            self.assertEqual(energy_charts.analyse("at", series, self.events, self.cfg, at(0)), [], dropped)
+        self.assertEqual(self.events, {})
+
+    def test_single_low_value_in_between_is_not_enough(self):
+        series = load_series(self.newest, dropped=1, drop=0.8, recovered=6)
         self.assertEqual(energy_charts.analyse("at", series, self.events, self.cfg, at(0)), [])
+
+    def test_hourly_values_only_the_newest_is_provisional(self):
+        hourly = load_series(self.newest, points=880, dropped=12, drop=0.5)[3::4]  # 3 Stundenwerte im Einbruch
+        signal = energy_charts.analyse("sk", hourly, self.events, self.cfg, at(0))[0]
+        self.assertEqual(signal.area, "SK")
+        self.assertEqual(signal.started_at, self.newest - timedelta(minutes=120))
+        self.assertEqual(signal.observed_at, self.newest - timedelta(minutes=60))
 
     def test_drop_and_recovery(self):
         series = load_series(self.newest, dropped=4, drop=0.5)
@@ -161,14 +175,19 @@ class LoadAnalysis(unittest.TestCase):
         self.assertEqual((signal.area, signal.kind), ("AT", "load_drop"))
         self.assertAlmostEqual(signal.severity, 0.5, places=2)
         self.assertEqual(signal.started_at, self.newest - timedelta(minutes=45))
-        self.assertEqual(signal.observed_at, self.newest)
+        self.assertEqual(signal.observed_at, self.newest - timedelta(minutes=30))  # der neueste Wert, der schon zählt
         self.assertRegex(signal.detail, r"^Stromlast −50 % \(\d\.\d{3} statt \d\.\d{3} MW\)$")
 
         later = self.newest + timedelta(minutes=30)
         series = load_series(later, dropped=4, drop=0.5, recovered=2)
         signal = energy_charts.analyse("at", series, self.events, self.cfg, at(30))[0]
+        self.assertTrue(signal.active)  # die beiden normalen Werte sind noch vorläufig
+
+        later = self.newest + timedelta(minutes=60)
+        series = load_series(later, dropped=4, drop=0.5, recovered=4)
+        signal = energy_charts.analyse("at", series, self.events, self.cfg, at(60))[0]
         self.assertFalse(signal.active)
-        self.assertEqual(signal.ended_at, later - timedelta(minutes=15))
+        self.assertEqual(signal.ended_at, later - timedelta(minutes=45))
         self.assertEqual(self.events, {})
 
     def test_old_data_allows_no_statement(self):
@@ -187,15 +206,17 @@ class LoadCollector(unittest.TestCase):
             {"timestamp": "2026-11-26T09:30:00+01:00", "values": {"load": 0}},
         ], "available_until": "2026-11-26T09:15:00+01:00"}
         with mock.patch.object(energy_charts.http, "get_json", return_value=doc) as get_json:
-            points = energy_charts.fetch_load("https://api.energy-charts.info", "at", at(0))
+            points = energy_charts.fetch_load("https://api.energy-charts.info", "at", at(0), 30)
         self.assertEqual(points, [["2026-11-26T08:00:00Z", 7000.5]])
-        self.assertEqual(get_json.call_args.kwargs["params"]["country"], "at")
+        params = get_json.call_args.kwargs["params"]
+        self.assertEqual((params["country"], params["start"], params["end"]),
+                         ("at", "2026-11-25T05:00Z", "2026-11-26T11:00Z"))
 
     def test_collect_keeps_latest_values_and_spares_the_api(self):
         cursor = {}
         calls = []
 
-        def fake(base, country, now):
+        def fake(base, country, now, hours):
             calls.append(country)
             if country == "de":
                 raise HttpError("HTTP 404 von api.energy-charts.info", status=404)
@@ -208,10 +229,39 @@ class LoadCollector(unittest.TestCase):
             energy_charts.collect(self.cfg, cursor, at(5), {})
         self.assertEqual(calls[2:], ["cz", "sk"])
         latest = cursor["latest"]["AT"]
-        self.assertEqual(latest["t"], iso(at(-165)))
+        self.assertEqual(latest["t"], iso(at(-195)))  # der neueste Wert, der nicht mehr vorläufig ist
+        self.assertEqual(latest["newest"], iso(at(-165)))
+        self.assertFalse(latest["silent"])
         self.assertAlmostEqual(latest["mw"], latest["ref_mw"], places=1)  # gleicher Tagesgang wie am Vortag
         self.assertEqual(parse_ts(cursor["next_poll"]["de"]), at(360))  # unbekanntes Land: erst in 6 Stunden wieder
         self.assertEqual(parse_ts(cursor["next_poll"]["at"]), at(15))
+
+    def test_values_that_stop_coming_are_marked(self):
+        """Beim Stromausfall in Spanien am 28.04.2025 blieben die Lastwerte eineinhalb Tage lang aus."""
+        cursor = {}
+        frozen = load_series(at(-165))
+        with mock.patch.object(energy_charts, "fetch_load", return_value=frozen):
+            for minute in range(0, 135, 15):
+                energy_charts.collect(self.cfg, cursor, at(minute), {})
+                self.assertFalse(cursor["latest"]["AT"]["silent"], minute)
+            energy_charts.collect(self.cfg, cursor, at(135), {})  # zwei Stunden über dem üblichen Alter
+        self.assertTrue(cursor["latest"]["AT"]["silent"])
+        self.assertEqual(cursor["latest"]["AT"]["newest"], iso(at(-165)))
+
+        moving = load_series(at(-15))
+        with mock.patch.object(energy_charts, "fetch_load", return_value=moving):
+            energy_charts.collect(self.cfg, cursor, at(150), {})
+        self.assertFalse(cursor["latest"]["AT"]["silent"])
+
+    def test_no_claim_about_missing_values_while_the_service_is_down(self):
+        cursor = {}
+        with mock.patch.object(energy_charts, "fetch_load", return_value=load_series(at(-165))):
+            energy_charts.collect(self.cfg, cursor, at(0), {})
+        with mock.patch.object(energy_charts, "fetch_load", side_effect=HttpError("HTTP 503 von api.energy-charts.info")):
+            for minute in range(15, 300, 15):
+                energy_charts.collect(self.cfg, cursor, at(minute), {})
+        self.assertFalse(cursor["latest"]["AT"]["silent"])
+        self.assertIn("at: HTTP 503", cursor["note"])
 
 
 PAGE = """<html><body><main id="netz-main-content"> <span class="solrindex">

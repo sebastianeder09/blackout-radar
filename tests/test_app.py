@@ -13,6 +13,7 @@ from blackout_radar import __main__ as app
 from blackout_radar import collectors, config, notify, report
 from blackout_radar.engine import Engine
 from blackout_radar.http import HttpError
+from blackout_radar.model import iso
 
 from .helpers import at, make_cfg, media
 
@@ -229,6 +230,15 @@ class StatusReport(unittest.TestCase):
         self.assertIn("- Kuba: keine neuen Medienberichte seit 13:10", text)
         self.assertIn("| nicht belegt | Kuba | Blackout (laut Medien) | −50 % |", text)
         self.assertIn("| 24 Stunden | 1 | 0 | – |", text)
+
+    def test_missing_load_values_are_not_shown_as_normal(self):
+        cfg = make_cfg()
+        state = {"cursors": {"load": {"latest": {
+            "AT": {"t": iso(at(-300)), "mw": 9378.0, "ref_mw": 8831.0, "newest": iso(at(-285)), "silent": True},
+            "DE": {"t": iso(at(-120)), "mw": 73768.0, "ref_mw": 73014.0, "newest": iso(at(-90)), "silent": False}}}}}
+        text = report.Report(cfg, state, at(0)).markdown()
+        self.assertIn("| Stromlast Österreich | keine neuen Werte seit 07:15 (zuletzt 9.378 MW) |", text)
+        self.assertIn("| Stromlast Deutschland | 73.768 MW (Stand 10:00), +1 % gegenüber dem Vortag |", text)
 
     def test_watch_list_explains_why_nothing_was_sent(self):
         cfg = make_cfg()

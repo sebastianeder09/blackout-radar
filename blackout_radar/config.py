@@ -54,8 +54,12 @@ DEFAULTS: dict = {
             # (einzelne Viertelstunden und die neuesten Werte nur zum Teil gemeldet).
             "countries": ["at", "de", "cz", "sk", "hu", "ch", "fr", "es", "pt", "pl"],
             "drop_threshold": 0.20, "recover_threshold": 0.08, "confirm_points": 2,
+            "settle_minutes": 30,          # so alt muss ein Wert sein, bevor er zählt (neueste Werte sind vorläufig)
+            "silent_after_minutes": 120,   # so lange über das Übliche hinaus ohne neuen Wert: "keine neuen Werte"
             "poll_minutes_primary": 15, "poll_minutes": 45, "max_requests_per_run": 2,
-            "max_data_age_hours": 6,
+            "max_data_age_hours": 8,
+            "history_hours": 200,          # Verlauf für die Vergleichstage (bis zum selben Wochentag der Vorwoche)
+            "refresh_hours": 30,           # so weit zurück wird laufend nachgeladen, einmal am Tag alles
         },
         "ioda": {
             "enabled": False,  # Abfrage noch nicht gegen echte Daten geprüft (Dienst antwortete nicht)

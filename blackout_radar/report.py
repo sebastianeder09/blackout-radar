@@ -131,6 +131,11 @@ class Report:
             rows.append((f"Internet-Erreichbarkeit {areas.name(area)}",
                          f"{state} (Stand {self.clock(parse_ts(entry.get('t')))})"))
         for area, entry in (cursors.get("load", {}).get("latest") or {}).items():
+            if entry.get("silent"):
+                since = self.clock(parse_ts(entry.get("newest") or entry["t"]))
+                rows.append((f"Stromlast {areas.name(area)}",
+                             f"keine neuen Werte seit {since} (zuletzt {number(entry['mw'])} MW)"))
+                continue
             text = f"{number(entry['mw'])} MW (Stand {self.clock(parse_ts(entry['t']))})"
             if entry.get("ref_mw"):
                 change = entry["mw"] / entry["ref_mw"] - 1

@@ -138,14 +138,16 @@ def probe_load(cfg: dict, now) -> None:
 # Echte Zeiträume, an denen sich die Lastauswertung messen lässt: ein Stromausfall und ruhige Tage
 # mit Wochenenden und Feiertagen, an denen sie nichts melden darf. None steht für "die letzten 14 Tage".
 REPLAYS = [
-    ("es", "2025-04-25T00:00Z", "2025-04-30T12:00Z", "Stromausfall Iberische Halbinsel, 28.04.2025"),
-    ("pt", "2025-04-25T00:00Z", "2025-04-30T12:00Z", "Stromausfall Iberische Halbinsel, 28.04.2025"),
-    ("cz", "2025-07-01T00:00Z", "2025-07-06T00:00Z", "Stromausfall in Prag und Nordböhmen, 04.07.2025"),
-    ("hr", "2024-06-18T00:00Z", "2024-06-23T00:00Z", "Stromausfall am Westbalkan, 21.06.2024"),
-    ("ba", "2024-06-18T00:00Z", "2024-06-23T00:00Z", "Stromausfall am Westbalkan, 21.06.2024"),
-    ("me", "2024-06-18T00:00Z", "2024-06-23T00:00Z", "Stromausfall am Westbalkan, 21.06.2024"),
-    ("al", "2024-06-18T00:00Z", "2024-06-23T00:00Z", "Stromausfall am Westbalkan, 21.06.2024"),
-    ("at", None, None, "die letzten 14 Tage, Normalbetrieb"),
+    ("es", "2025-04-18T00:00Z", "2025-04-30T12:00Z", "Stromausfall Iberische Halbinsel, 28.04.2025"),
+    ("pt", "2025-04-18T00:00Z", "2025-04-30T12:00Z", "Stromausfall Iberische Halbinsel, 28.04.2025"),
+    ("cz", "2025-06-24T00:00Z", "2025-07-07T00:00Z", "Stromausfall in Prag und Nordböhmen, 04.07.2025"),
+    ("hr", "2024-06-11T00:00Z", "2024-06-25T00:00Z", "Stromausfall am Westbalkan, 21.06.2024"),
+    ("ba", "2024-06-11T00:00Z", "2024-06-25T00:00Z", "Stromausfall am Westbalkan, 21.06.2024"),
+    ("me", "2024-06-11T00:00Z", "2024-06-25T00:00Z", "Stromausfall am Westbalkan, 21.06.2024"),
+    ("at", None, None, "die letzten 21 Tage, Normalbetrieb"),
+    ("at", "2026-04-17T00:00Z", "2026-05-05T00:00Z", "Wochen um den Feiertag am Freitag, 01.05.2026"),
+    ("at", "2025-12-15T00:00Z", "2026-01-08T00:00Z", "Weihnachten und Jahreswechsel 2025/26"),
+    ("de", None, None, "die letzten 21 Tage, Normalbetrieb"),
 ]
 _NOT_GENERATION = {"load", "residual_load", "renewable_share_of_load", "renewable_share_of_generation",
                    "cross_border_electricity_trading"}
@@ -158,22 +160,23 @@ def _generation(values: dict):
     return round(sum(parts)) if parts else None
 
 
-def replay(country: str, points: list, section: dict, lead_hours: int = 48) -> list:
+def replay(country: str, points: list, section: dict) -> list:
     """Geht eine Lastreihe Punkt für Punkt durch, so wie der Monitor sie nach und nach gesehen hätte.
 
+    Die Auswertung beginnt, sobald der Verlauf für alle Vergleichstage reicht.
     Liefert je Schritt mit Befund (Zeit des neuesten Werts, Signal).
     """
-    events, found = {}, []
+    events, past, found = {}, {}, []
     times = [parse_ts(stamp) for stamp, _ in points]
-    begin = times[0] + timedelta(hours=lead_hours)
+    begin = times[0] + timedelta(days=max(energy_charts.REFERENCE_DAYS), hours=4)
     first = 0
     for index, when in enumerate(times):
         if when < begin:
             continue
-        while times[first] < when - timedelta(hours=58):
+        while times[first] < when - timedelta(hours=section["history_hours"]):
             first += 1
         for signal in energy_charts.analyse(country, points[first: index + 1], events, section,
-                                            when + timedelta(hours=2)):
+                                            when + timedelta(hours=2), past):
             found.append((when, signal))
     return found
 
@@ -186,7 +189,7 @@ def probe_replay(cfg: dict, now) -> None:
             time.sleep(6)
         print(f"\n  --- {country}: {label}")
         doc = _json(_fetch(f"{base}/v2/public_power", {
-            "country": country, "start": start or _fmt(now - timedelta(days=14)), "end": end or _fmt(now)},
+            "country": country, "start": start or _fmt(now - timedelta(days=21)), "end": end or _fmt(now)},
             timeout=60, patient=True))
         if not isinstance(doc, dict):
             continue

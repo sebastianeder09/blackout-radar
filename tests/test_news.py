@@ -5,6 +5,7 @@ from unittest import mock
 from blackout_radar import gazetteer
 from blackout_radar.collectors import news
 from blackout_radar.http import HttpError
+from blackout_radar.model import iso
 
 from .helpers import at, make_cfg
 
@@ -36,35 +37,75 @@ class Headlines(unittest.TestCase):
                 self.assertEqual(news.count_people(title), expected)
 
     def test_relevant_headlines(self):
-        for title in ("Stromausfall in Linz: 20.000 Haushalte ohne Strom",
-                      "Apagón masivo en Cuba deja sin luz a millones",
-                      "Massive power outage hits Chile",
-                      "Blackout: Ganz Österreich ohne Strom"):
+        for language, title in (("de", "Stromausfall in Linz: 20.000 Haushalte ohne Strom"),
+                                ("de", "Blackout: Ganz Österreich ohne Strom"),
+                                ("de", "Stromausfälle und Unfälle nach Schneefall"),
+                                ("de", "Stromstörung in Linz-Kleinmünchen: Polizei ermittelt wegen Sachbeschädigung"),
+                                ("es-419", "Apagón masivo en Cuba deja sin luz a millones"),
+                                ("es-419", "Apagón afecta a Nariño y Putumayo por falla simultánea en circuitos"),
+                                ("en-US", "Massive power outage hits Chile"),
+                                ("en-US", "Massive blackout hits occupied Crimea"),
+                                ("en-US", "Blackout-hit Cuba struggles to keep hospitals running")):
             with self.subTest(title=title):
-                self.assertTrue(news.relevant(title))
+                self.assertTrue(news.relevant(title, language))
 
     def test_irrelevant_headlines(self):
-        for title in ("Blackout-Vorsorge: Gemeinde lädt zum Infoabend",
-                      "Experte warnt: Blackout könnte Österreich Milliarden kosten",
-                      "CFE anuncia cortes de luz programados en Monterrey",
-                      "Media blackout as election nears",
-                      "Blackout Wednesday: bars brace for the busiest night",
-                      'Thriller "Blackout": Ganz Europa ohne Strom',
-                      "Rolling blackouts return to South Africa",
-                      "Bürgermeister eröffnet neues Umspannwerk"):
+        for language, title in (("de", "Blackout-Vorsorge: Gemeinde lädt zum Infoabend"),
+                                ("de", "Experte warnt: Blackout könnte Österreich Milliarden kosten"),
+                                ("de", 'Thriller "Blackout": Ganz Europa ohne Strom'),
+                                ("de", "Bürgermeister eröffnet neues Umspannwerk"),
+                                ("de", "So bereiten sich Gemeinden auf einen Stromausfall vor"),
+                                ("de", "Stromausfall: Diese Vorräte sollten Sie daheim haben"),
+                                ("de", "Bundesheer übt Stromausfall-Szenario"),
+                                ("de", "Wels simuliert großflächigen Stromausfall"),
+                                ("de", "Blackout-Dorf Feldbach: So übersteht man einen Stromausfall"),
+                                ("de", "Nach Stromausfall: Mehr Schutz geplant"),
+                                ("es-419", "CFE anuncia cortes de luz programados en Monterrey"),
+                                ("en-US", "Media blackout as election nears"),
+                                ("en-US", "Blackout Wednesday: bars brace for the busiest night"),
+                                ("en-US", "Rolling blackouts return to South Africa"),
+                                ("en-US", "A powerful storm threatens to leave millions without power")):
             with self.subTest(title=title):
-                self.assertFalse(news.relevant(title))
+                self.assertFalse(news.relevant(title, language))
 
-    def test_follow_up_reports_do_not_start_a_story(self):
-        for title in ("Nach Stromausfall in Linz: Staatsschutz ermittelt",
-                      "Sabotage an Umspannwerk: Ermittlungen nach Linzer Stromausfall",
-                      "Stromausfall in Linz behoben: Strom wieder da",
-                      "Power restored after massive blackout in Chile",
-                      "Tras el apagón masivo, el gobierno investiga las causas"):
+    def test_blackout_alone_counts_in_english_but_not_in_german(self):
+        # Im Deutschen steht "Blackout" fast immer für Vorsorge. Alle drei standen am 26.11.2026 so in der Zeitung.
+        for title in ("Was Vorarlberg dem „Blackout“-Dorf voraushat",
+                      "BlackAUT prüft E-Autos als Speicher für Blackout in Graz",
+                      "Blackout: Freistadt rüstet Feuerwehrhäuser auf"):
+            with self.subTest(title=title):
+                self.assertFalse(news.relevant(title, "de"))
+        self.assertTrue(news.relevant("Blackout in Spain strands thousands of travellers", "en-US"))
+
+    def test_kinds_of_reports(self):
+        cases = {
+            "Stromausfall in Linz: 20.000 Haushalte ohne Strom": "lead",
+            "Kärnten: Tausende Haushalte ohne Strom": "lead",
+            "Massive Blackout Hits Colombia Following Terrorist Attack on Power Grid": "lead",
+            # Ursache und Ermittlungen: am Tag des Ausfalls oft schon die erste Schlagzeile
+            "Stromstörung in Linz-Kleinmünchen: Polizei ermittelt wegen Sachbeschädigung": "cause",
+            "Sabotage im Umspannwerk? Großer Stromausfall in Linz": "cause",
+            "20.000 Haushalte ohne Strom: Polizei vermutet Vorsatz": "cause",
+            "Autoridades investigan si apagón en Nariño fue un atentado de grupos armados": "cause",
+            # Aufarbeitung und Wiederherstellung
+            "Nach Stromausfall und Schaden an Linzer Umspannwerk ermittelt der Staatsschutz": "follow",
+            "Nach Stromstörung in Kleinmünchen: Linz Netz verschärft Schutz der Umspannwerke": "follow",
+            "Stromausfall in Linz behoben: Strom wieder da": "follow",
+            "Power being restored in stages after massive blackout hits Sabah’s east coast": "follow",
+            "Tras el apagón masivo, el gobierno investiga las causas": "follow",
+        }
+        for title, expected in cases.items():
             with self.subTest(title=title):
                 self.assertTrue(news.relevant(title))
-                self.assertFalse(news.is_lead(title))
-        self.assertTrue(news.is_lead("Stromausfall in Linz: 20.000 Haushalte ohne Strom"))
+                self.assertEqual(news.phase(title), expected)
+
+    def test_medium_is_the_site_without_regional_subdomain(self):
+        cases = {"ooe.orf.at": "orf.at", "kaernten.orf.at": "orf.at", "www.nachrichten.at": "nachrichten.at",
+                 "thestar.com.my": "thestar.com.my", "www.bbc.co.uk": "bbc.co.uk", "newsukraine.rbc.ua": "rbc.ua",
+                 "en.hespress.com": "hespress.com", "diariodelsur.com.co": "diariodelsur.com.co"}
+        for host, expected in cases.items():
+            with self.subTest(host=host):
+                self.assertEqual(news.medium(host), expected)
 
     def test_nationwide_wording(self):
         self.assertTrue(news.NATIONWIDE.search("Blackout: Ganz Österreich ohne Strom"))
@@ -79,6 +120,13 @@ class Places(unittest.TestCase):
             "Blackout in Linz-Kleinmünchen": ["AT-4"],
             "Stromausfall im Mühlviertel, Österreich": ["AT-4"],  # das Bundesland schließt den Staat ein
             "Stromausfall in Wien-Favoriten": ["AT"],
+            "Stromausfall in OÖ: 5.000 Haushalte betroffen": ["AT-4"],
+            "Stromausfall legt Linzer Innenstadt lahm": ["AT-4"],
+            "Stromausfall in Freistadt und Perg": ["AT-4"],
+            "Kärnten: Tausende Haushalte ohne Strom": ["AT"],
+            "Österreichs Staatsschutz ermittelt nach Stromausfall": ["AT"],
+            "Apagón masivo en Nariño, Putumayo, Cauca y Huila: reportan presunto ataque": ["CO"],
+            "Apagón masivo en Salta: varios municipios quedaron sin energía": ["AR"],
             "Blackout: Ganz Österreich ohne Strom": ["AT"],
             "Großflächiger Stromausfall in Spanien und Portugal": ["ES", "PT"],
             "Blackout in Spanien: Österreicher sitzen fest": ["ES"],
@@ -103,7 +151,7 @@ class Feed(unittest.TestCase):
         self.assertEqual(len(items), 1)  # der Eintrag ohne Datum fällt weg
         item = items[0]
         self.assertEqual(item["title"], "Stromausfall in Linz: 20.000 Haushalte ohne Strom")
-        self.assertEqual(item["domain"], "ooe.orf.at")
+        self.assertEqual(item["domain"], "orf.at")  # die Landesstudios des ORF zählen als ein Medium
         self.assertEqual(item["when"], at(-20))
 
 
@@ -114,7 +162,7 @@ def item(title, domain, when):
 class Stories(unittest.TestCase):
     def setUp(self):
         self.cfg = make_cfg()["sources"]["news"]
-        self.cursor = {}
+        self.cursor = {"since": iso(at(-24 * 60))}  # die Überwachung läuft schon seit gestern
         self.feeds = {}  # Suchtext -> Einträge
         pause = mock.patch.object(news, "PAUSE_SECONDS", 0)
         fetch = mock.patch.object(news, "fetch", side_effect=self.fake_fetch)
@@ -154,6 +202,51 @@ class Stories(unittest.TestCase):
         signals = self.collect(0)
         self.assertEqual(self.media_signals(signals), {})
         self.assertEqual(len([s for s in signals if s.kind == "news"]), 1)  # als Beleg bleibt der Bericht erhalten
+
+    def test_first_headline_with_the_cause_counts_as_first_report(self):
+        # So begann die Berichterstattung über den Linzer Stromausfall vom 23.11.2026.
+        self.feeds["Mühlviertel"] = [item("Stromstörung in Linz-Kleinmünchen: Polizei ermittelt wegen Sachbeschädigung",
+                                          "tips.at", at(-5))]
+        signal = self.media_signals(self.collect(0))["AT-4"]
+        self.assertTrue(signal.active)
+        self.assertEqual(signal.started_at, at(-5))
+
+    def test_headline_without_a_place_needs_a_second_medium(self):
+        reports = [item("Großflächiger Stromausfall: Ermittlungen wegen schwerer Sachbeschädigung in Umspannwerk",
+                        "laumat.at", at(-20))]
+        self.feeds["Mühlviertel"] = reports
+        self.assertEqual(self.media_signals(self.collect(0)), {})
+        reports.append(item("20.000 Haushalte ohne Strom: Polizei vermutet Vorsatz", "kurier.at", at(3)))
+        signal = self.media_signals(self.collect(5))["AT-4"]
+        self.assertEqual(signal.metrics["sources"], 2)
+        self.assertAlmostEqual(signal.severity, 40_000 / 1_530_000, places=3)
+
+    def test_reports_about_the_cause_on_later_days_trigger_nothing(self):
+        self.feeds["Mühlviertel"] = [item("Stromausfall in Linz: 20.000 Haushalte ohne Strom", "nachrichten.at", at(-20))]
+        self.assertTrue(self.media_signals(self.collect(0))["AT-4"].active)
+        # vier Stunden später: Die Lage läuft noch, Berichte über die Ursache verlängern sie nicht
+        self.feeds["Mühlviertel"] = [item("Sabotage im Umspannwerk? Großer Stromausfall in Linz", "5min.at", at(230))]
+        self.assertEqual(self.media_signals(self.collect(240))["AT-4"].metrics["sources"], 1)
+        self.assertFalse(self.media_signals(self.collect(345))["AT-4"].active)  # sechs Stunden nach dem Erstbericht
+        # am nächsten Tag: Aufarbeitung
+        day = 24 * 60
+        self.feeds["Mühlviertel"] = [
+            item("Staatsschutz ermittelt nach Stromausfall in Linz", "diepresse.com", at(day - 30)),
+            item("20.000 von Stromausfall in Linz betroffen: Jetzt ermittelt Staatsschutz", "5min.at", at(day - 10))]
+        signals = self.collect(day)
+        self.assertEqual(self.media_signals(signals), {})
+        self.assertEqual(len([s for s in signals if s.kind == "news"]), 2)  # als Beleg bleiben die Berichte erhalten
+        # ein neuer Ausfall im selben Gebiet wird trotzdem sofort erkannt
+        self.feeds["Mühlviertel"] = [item("Stromausfall in Wels: 3.000 Haushalte ohne Strom", "tips.at", at(day + 50))]
+        self.assertTrue(self.media_signals(self.collect(day + 60))["AT-4"].active)
+
+    def test_after_a_restart_reports_about_the_cause_do_not_start_a_story(self):
+        self.cursor.clear()  # Vorgeschichte unbekannt
+        self.feeds["Mühlviertel"] = [item("Stromausfall durch Sabotage in Umspannwerk in Linz", "orf.at", at(-30))]
+        self.assertEqual(self.media_signals(self.collect(0)), {})
+        self.assertEqual(self.media_signals(self.collect(170)), {})
+        self.feeds["Mühlviertel"] = [item("Stromausfall in Linz: 20.000 Haushalte ohne Strom", "orf.at", at(175))]
+        self.assertTrue(self.media_signals(self.collect(180))["AT-4"].active)  # ein Erstbericht zählt immer
 
     def test_old_reports_trigger_nothing(self):
         self.feeds["Mühlviertel"] = [item("Stromausfall in Linz", "nachrichten.at", at(-200))]

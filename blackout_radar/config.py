@@ -73,6 +73,7 @@ DEFAULTS: dict = {
             "enabled": True,
             "max_age_minutes": 180,        # ältere Berichte lösen nichts mehr aus
             "quiet_hours": 6,              # so lange ohne neuen Erstbericht, dann gilt die Lage als beendet
+            "followup_days": 7,            # so lange gelten Berichte über Ursachen danach als Aufarbeitung
             "priority_min_sources": 1,     # Gebiet mit eigener Suche: schon ein Medium reicht (je Suche änderbar)
             "world_min_sources": 3,        # sonst müssen so viele verschiedene Medien berichten
             "big_sources": 6,              # ab so vielen Medien gilt ein Ausfall ohne Zahlenangabe als groß

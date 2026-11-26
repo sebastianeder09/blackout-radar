@@ -5,6 +5,9 @@ auch dem Bundesland). Die Liste ist bewusst grob. Mehrdeutige Namen fehlen
 absichtlich, zum Beispiel Georgia (Staat und US-Bundesstaat), Jordan, Chad, Niger. Städte, die es
 auch in den USA gibt (Naples, Venice, St. Petersburg, Melbourne, Odessa), stehen nur in der
 Schreibweise ihres Landes in der Liste.
+
+Für Österreich ist die Liste dichter: Je mehr Orte außerhalb Oberösterreichs bekannt sind,
+desto seltener wird ein Bericht aus einem anderen Bundesland Oberösterreich zugeschlagen.
 """
 from __future__ import annotations
 
@@ -16,13 +19,13 @@ SKIP = {"Georgia", "Jordan", "Chad", "Niger", "Tschad"}
 
 # Gebiet: weitere Schreibweisen, Einwohnerbezeichnungen, Regionen und Städte
 _ALIASES = """
-AT-4: Oberösterreich|Upper Austria|Linz|Wels|Steyr|Mühlviertel|Innviertel|Traunviertel|Hausruckviertel
-AT: Austrian|Autriche|Wien|Vienna|Graz|Salzburg|Innsbruck|Klagenfurt|Tirol|Tyrol|Steiermark|Kärnten|Vorarlberg|Burgenland|Niederösterreich
+AT-4: Oberösterreich|Upper Austria|Linz|Wels|Steyr|Mühlviertel|Innviertel|Traunviertel|Hausruckviertel|Oberösterreichs|OÖ|Linzer|Welser|Steyrer|Mühlviertler|Innviertler|Urfahr|Kleinmünchen|Ebelsberg|Leonding|Traun|Ansfelden|Pasching|Hörsching|Marchtrenk|Enns|Braunau|Ried im Innkreis|Bezirk Ried|Schärding|Vöcklabruck|Gmunden|Bad Ischl|Kirchdorf an der Krems|Bezirk Kirchdorf|Freistadt|Perg|Bezirk Rohrbach|Eferding|Grieskirchen|Attnang-Puchheim|Mauthausen|Gallneukirchen|Salzkammergut
+AT: Austrian|Autriche|Wien|Vienna|Graz|Salzburg|Innsbruck|Klagenfurt|Tirol|Tyrol|Steiermark|Kärnten|Vorarlberg|Burgenland|Niederösterreich|Österreichs|Lower Austria|Styria|Carinthia|NÖ|Wiener Neustadt|Wiener|St. Pölten|Sankt Pölten|Krems|Amstetten|Mödling|Klosterneuburg|Waldviertel|Weinviertel|Mostviertel|Eisenstadt|Grazer|Leoben|Kapfenberg|Obersteiermark|Kärntner|Villach|Wolfsberg|Osttirol|Lienz|Kufstein|Kitzbühel|Bregenz|Dornbirn|Feldkirch|Bludenz|Pinzgau|Pongau|Lungau
 DE: German|Allemagne|Alemania|Germania|Berlin|München|Munich|Hamburg|Frankfurt|Köln|Cologne|Stuttgart|Bayern|Bavaria
 CH: Swiss|Suisse|Suiza|Svizzera|Zürich|Zurich|Genf|Geneva|Genève|Basel
 IT: Italian|Italia|Italie|Rom|Rome|Roma|Milano|Mailand|Napoli|Neapel|Turin|Torino|Sicily|Sicilia|Sizilien|Sardinia|Sardegna|Sardinien|Südtirol|Venedig|Venezia
 FR: French|Francia|França|Paris|Marseille|Lyon|Toulouse|Bordeaux|Cannes
-ES: España|Spanish|Espagne|Spagna|Espanha|Madrid|Barcelona|Sevilla|Seville|Andalucía|Cataluña|Catalonia|Canarias|Canary Islands|Kanaren|Tenerife|Teneriffa|Mallorca
+ES: España|Spanish|Espagne|Spagna|Espanha|Madrid|Barcelona|Sevilla|Seville|Andalucía|Cataluña|Catalonia|Canarias|Canary Islands|Kanaren|Tenerife|Teneriffa|Mallorca|Málaga|Bilbao|Zaragoza|Galicia|Asturias|Extremadura|Castilla
 PT: Portuguese|Portogallo|Lisbon|Lisboa|Lissabon
 GB: Britain|UK|U.K.|England|Scotland|Wales|Northern Ireland|London|Heathrow|Großbritannien|Schottland|Royaume-Uni|Reino Unido|Gran Bretaña
 IE: Irish|Dublin
@@ -120,20 +123,20 @@ AM: Armenian|Yerevan|Eriwan
 GE: Tbilisi|Tiflis
 AU: Australian|Sydney|Brisbane|Adelaide|Queensland|New South Wales|Tasmania|Western Australia|South Australia
 NZ: Auckland|Christchurch
-US: United States|Estados Unidos|États-Unis|New Mexico|New England|Panama City|Texas|California|Kalifornien|Florida|New York|Louisiana|Michigan|Ohio|Pennsylvania|Illinois|North Carolina|South Carolina|Virginia|Tennessee|Kentucky|Alabama|Mississippi|Oklahoma|Arkansas|Missouri|Wisconsin|Minnesota|Colorado|Arizona|Nevada|Oregon|Massachusetts|New Jersey|Maryland|Hawaii|Alaska|Houston|Dallas|Chicago|Los Angeles|San Francisco|San Diego|Seattle|Miami|Atlanta|Detroit|Boston|Philadelphia|New Orleans|Las Vegas
+US: United States|Estados Unidos|États-Unis|New Mexico|New England|Panama City|Texas|California|Kalifornien|Florida|New York|Louisiana|Michigan|Ohio|Pennsylvania|Illinois|North Carolina|South Carolina|Virginia|Tennessee|Kentucky|Alabama|Mississippi|Oklahoma|Arkansas|Missouri|Wisconsin|Minnesota|Colorado|Arizona|Nevada|Oregon|Massachusetts|New Jersey|Maryland|Hawaii|Alaska|Houston|Dallas|Chicago|Los Angeles|San Francisco|San Diego|Seattle|Miami|Atlanta|Detroit|Boston|Philadelphia|New Orleans|Las Vegas|Indiana|Iowa|Kansas|Nebraska|Utah|Idaho|Montana|Wyoming|Connecticut|Maine|Vermont|New Hampshire|Rhode Island|Delaware|West Virginia|North Dakota|South Dakota|Phoenix|Denver|Austin|San Antonio|Charlotte|Nashville|Memphis|Pittsburgh|Cleveland|Minneapolis|St. Louis|Tampa|Orlando
 CA: Canadian|Canadá|Ontario|Quebec|Québec|British Columbia|Alberta|Manitoba|Nova Scotia|Toronto|Montreal|Montréal|Vancouver|Calgary|Ottawa
-MX: México|Mexique|Mexican|Mexico City|Ciudad de México|Yucatán|Nuevo León|Monterrey|Guadalajara
-CU: Cuban|La Habana|Havana|Havanna
+MX: México|Mexique|Mexican|Mexico City|Ciudad de México|Yucatán|Nuevo León|Monterrey|Guadalajara|mexicano|mexicana|CDMX|Puebla|Jalisco|Veracruz|Chiapas|Oaxaca|Sonora|Sinaloa|Tamaulipas|Chihuahua|Coahuila|Quintana Roo|Cancún|Tijuana|Baja California|Campeche|Tabasco|Michoacán|Guanajuato|Querétaro
+CU: Cuban|La Habana|Havana|Havanna|cubano|cubana|Santiago de Cuba|Holguín|Matanzas|Camagüey
 DO: República Dominicana|Dominican Republic|Santo Domingo
 HT: Haïti|Haití
-VE: Venezuelan|Caracas|Maracaibo
-CO: Colombian|Colômbia|Bogotá|Bogota|Medellín
-EC: Ecuadorian|Quito|Guayaquil
-PE: Perú|Peruvian
+VE: Venezuelan|Caracas|Maracaibo|venezolano|venezolana|Zulia|Táchira|Corpoelec
+CO: Colombian|Colômbia|Bogotá|Bogota|Medellín|colombiano|colombiana|Nariño|Putumayo|Caquetá|Huila|Cauca|Pasto|Barranquilla|Antioquia
+EC: Ecuadorian|Quito|Guayaquil|ecuatoriano|ecuatoriana
+PE: Perú|Peruvian|peruano|peruana|Lima|Arequipa|Cusco|Piura
 BO: Bolivian
-CL: Chilean|Santiago de Chile
-AR: Argentine|Argentinian|Buenos Aires
-BR: Brasil|Brazilian|Brésil|São Paulo|Sao Paulo|Rio de Janeiro|Brasília|Amapá|Roraima|Minas Gerais
+CL: Chilean|Santiago de Chile|chileno|chilena|Valparaíso|Antofagasta|Biobío
+AR: Argentine|Argentinian|Buenos Aires|argentino|Salta|Mendoza|Tucumán|Rosario|AMBA|Jujuy|Neuquén|La Plata|Mar del Plata|Edesur|Edenor
+BR: Brasil|Brazilian|Brésil|São Paulo|Sao Paulo|Rio de Janeiro|Brasília|Amapá|Roraima|Minas Gerais|brasileiro|brasileira|Bahia|Pernambuco|Ceará|Pará|Maranhão|Goiás|Mato Grosso|Rio Grande do Sul|Santa Catarina|Recife|Fortaleza|Manaus|Belo Horizonte|Curitiba|Porto Alegre
 PY: Paraguayan|Asunción
 UY: Uruguayan|Montevideo
 PA: Panamá

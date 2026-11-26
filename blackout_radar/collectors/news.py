@@ -9,8 +9,18 @@ Drei Suchen:
 
 Aus den Berichten je Gebiet entsteht ein Medien-Signal (media_outage) mit geschätzter
 Größe: Zahlen aus der Schlagzeile ("20.000 Haushalte"), "landesweit" oder die Breite der
-Berichterstattung. Folgeberichte (Ermittlungen, Ursachen, Wiederherstellung) und Warnungen,
-Übungen oder geplante Abschaltungen lösen nichts aus.
+Berichterstattung.
+
+Was nichts auslöst:
+  - Vorsorge, Übungen, Warnungen, geplante Abschaltungen, Romane und Filme.
+  - Im Deutschen das Wort "Blackout" allein. Es steht dort fast immer für Vorsorge und
+    Szenarien, ein echter Ausfall heißt "Stromausfall" oder "ohne Strom".
+  - Aufarbeitung und Wiederherstellung ("Nach Stromausfall: ...", "Strom wieder da").
+  - Berichte über Ursache und Ermittlungen, wenn die Lage im Gebiet schon bekannt ist. Am Tag
+    des Ausfalls steht die Ursache dagegen oft schon in der ersten Schlagzeile ("Stromstörung
+    in Linz: Polizei ermittelt"), dann zählt der Bericht als Erstbericht.
+  - Ein einzelner Bericht, dessen Schlagzeile keinen Ort nennt. Er wurde nur von der Suche
+    einem Gebiet zugeordnet, deshalb braucht es ein zweites Medium.
 
 Die RSS-Suche von Google News ist für Feed-Leser gedacht und nicht garantiert. Dieses
 Programm fragt sie sparsam ab (wenige Suchen je Lauf).
@@ -44,11 +54,20 @@ POWER_WORDS = re.compile(
     r"výpadek proudu|áramszünet|pană de curent|elektrik kesintisi|отключени|блэкаут|відключенн|"
     r"انقطاع الكهرباء|停电|停電|정전|mất điện|pemadaman listrik", re.IGNORECASE)
 
+# Deutsche Wörter für einen tatsächlichen Ausfall ("Blackout" allein zählt im Deutschen nicht)
+GERMAN_OUTAGE = re.compile(
+    r"stromausf[aä]ll|stromstörung|stromunterbrechung|ohne strom|strom weg|kein strom", re.IGNORECASE)
+
 # Zählt nie: Vorsorge und Übungen, Warnungen, geplante Abschaltungen, Romane und Filme,
 # "Blackout" im übertragenen Sinn
 EXCLUDE = re.compile(
-    r"vorsorge|übung|ratgeber|was tun|jahrestag|planspiel|simulation|checkliste|podcast|quiz|testalarm|"
-    r"probealarm|vortrag|infoabend|blackout-gefahr|wie wahrscheinlich|notfallplan|vorbereit|"
+    r"vorsorge|übung|ratgeber|was tun|jahrestag|planspiel|simulation|simulier|checkliste|podcast|quiz|testalarm|"
+    r"probealarm|vortrag|infoabend|wie wahrscheinlich|unwahrscheinlich|notfallplan|vorbereit|"
+    r"bereite[nt]? sich|\brüste[nt]\b|gerüstet|wappne|vorr[aä]t|sollten sie|\btipps?\b|\bstudie|umfrage|"
+    r"\bwürden?\b|\bwäre\b|szenario|ernstfall|\bprobt\b|geprobt|\büb(?:t|en)\b|geübt|angst vor|sorgen? vor|"
+    r"für den fall|im falle?\b|was passiert|wenn der strom|leuchtt[uü]rm|zivilschutzverband|zivilschutztag|"
+    r"workshop|schulung|versicherung|kampagne|broschüre|gefahr eines|"
+    r"blackout[“”\"']?-(?!nacht|chaos|drama|schock|hit|stricken|struck)|"
     r"preparedness|\bdrill|anniversary|how to prepare|simulacro|aniversario|"
     r"\b(?:threatens?|could|might|warns?|warning|risk of|at risk|fears?|looms?|braces?|plans? for|"
     r"droht|drohen|könnte|warnt|warnung|riesgo|podría|advierte|amenaza|peligro|risque|pourrait|rischio)\b|"
@@ -63,20 +82,26 @@ EXCLUDE = re.compile(
     r"microsoft|cloud|\baws\b|azure|playstation|xbox|whatsapp|instagram|facebook|netflix|youtube|"
     r"airspace|skies|internetausfall|mobilfunk", re.IGNORECASE)
 
-# Zählt als Bericht, löst aber nichts aus: Aufarbeitung, Ursachen, Wiederherstellung
+# Aufarbeitung und Wiederherstellung: zählt als Beleg, löst aber nie etwas aus
 FOLLOWUP = re.compile(
-    r"^nach\b.*(?:stromausfall|stromstörung|blackout)|ermittel|ermittlung|staatsschutz|sabotage|"
-    r"sachbeschädigung|vorsatz|anschlag|ursache|rätsel|bilanz|konsequenz|entschädigung|prozess|urteil|"
-    r"gericht|festgenommen|verdächtig|rückblick|analyse|kommentar|interview|\bschutz|lehren|aufarbeitung|"
-    r"tag danach|nachwehen|chronologie|protokoll einer|so erlebte|"
+    r"^nach\b.*(?:stromausfall|stromstörung|blackout)|bilanz|konsequenz|entschädigung|prozess|urteil|"
+    r"gericht|rückblick|analyse|kommentar|interview|\bschutz|lehren|aufarbeitung|"
+    r"tag danach|nachwehen|chronologie|protokoll einer|so erlebte|bisher bekannt|was wir wissen|"
     r"wieder (?:da|hergestellt|versorgt|am netz)|behoben|entwarnung|"
-    r"^after\b.*(?:blackout|outage)|restor|back online|power returns|power is back|investigat|inquiry|"
-    r"\bprobe\b|report finds|lessons|year after|explained|what caused|caused by|blam(?:es|ed|ing)|"
+    r"^after\b.*(?:blackout|outage)|restor|back online|power returns|power is back|"
+    r"report finds|lessons|year after|explained|what we know|"
     r"compensation|lawsuit|\bcourt\b|aftermath|recover|death toll|timeline|"
-    r"restablec|restitu|vuelve la luz|regresa la luz|recupera|investig|hipótesis|causas? del|responsables|"
+    r"restablec|restitu|vuelve la luz|regresa la luz|recupera|"
     r"tras el (?:último |gran |masivo )?apagón|después del apagón|donde comenzó|exigirá|pronunciamiento|"
-    r"atribu[iy]e?|restabelec|após o apagão|depois do apagão|causas? do|"
-    r"rétabli|enquête|après la panne|ripristin|indagin|dopo il (?:maxi[- ])?blackout", re.IGNORECASE)
+    r"restabelec|após o apagão|depois do apagão|"
+    r"rétabli|après la panne|ripristin|dopo il (?:maxi[- ])?blackout", re.IGNORECASE)
+
+# Ursache und Ermittlungen: am Tag des Ausfalls oft schon in der ersten Schlagzeile, Tage später
+# Aufarbeitung. Ob so ein Bericht etwas auslöst, hängt davon ab, ob die Lage schon bekannt ist.
+CAUSE = re.compile(
+    r"ermittel|ermittlung|staatsschutz|sabotage|sachbeschädigung|vorsatz|anschlag|ursache|rätsel|"
+    r"festgenommen|verdächtig|investigat|inquiry|\bprobe\b|what caused|caused by|blam(?:es|ed|ing)|"
+    r"investig|hipótesis|causas? del|responsables|atribu[iy]e?|causas? do|enquête|indagin", re.IGNORECASE)
 
 NATIONWIDE = re.compile(
     r"nationwide|countrywide|country-wide|entire country|whole country|across the country|entire island|"
@@ -134,14 +159,28 @@ def count_people(title: str) -> int | None:
     return best or None
 
 
-def relevant(title: str) -> bool:
+def relevant(title: str, language: str = "") -> bool:
     """Wahr, wenn eine Schlagzeile von einem tatsächlichen Stromausfall handelt."""
-    return bool(POWER_WORDS.search(title)) and not EXCLUDE.search(title)
+    if not POWER_WORDS.search(title) or EXCLUDE.search(title):
+        return False
+    return not language.startswith("de") or bool(GERMAN_OUTAGE.search(title))
 
 
-def is_lead(title: str) -> bool:
-    """Wahr für einen Erstbericht, falsch für Aufarbeitung, Ursachen oder Wiederherstellung."""
-    return not FOLLOWUP.search(title)
+def phase(title: str) -> str:
+    """Art des Berichts: "lead" Erstbericht, "cause" Ursache und Ermittlungen, "follow" Aufarbeitung."""
+    if FOLLOWUP.search(title):
+        return "follow"
+    return "cause" if CAUSE.search(title) else "lead"
+
+
+_SECOND_LEVEL = {"co", "com", "org", "net", "gov", "gv", "ac", "or", "edu", "ne", "go"}
+
+
+def medium(host: str) -> str:
+    """Kürzt eine Adresse auf das Medium: ooe.orf.at und kaernten.orf.at sind beide orf.at."""
+    parts = host.lower().removeprefix("www.").split(".")
+    keep = 3 if len(parts) >= 3 and len(parts[-1]) == 2 and parts[-2] in _SECOND_LEVEL else 2
+    return ".".join(parts[-keep:])
 
 
 def fetch(query: str, language: str, country: str, edition: str | None = None) -> list[dict]:
@@ -152,7 +191,7 @@ def fetch(query: str, language: str, country: str, edition: str | None = None) -
         title = (node.findtext("title") or "").strip()
         source = node.find("source")
         name = (source.text or "").strip() if source is not None else ""
-        site = urlsplit(source.get("url") or "").netloc.removeprefix("www.") if source is not None else ""
+        site = medium(urlsplit(source.get("url") or "").netloc) if source is not None else ""
         try:
             when = parsedate_to_datetime(node.findtext("pubDate") or "")
         except (TypeError, ValueError):
@@ -180,15 +219,17 @@ def confirm_query(area: str) -> dict:
             "hl": "en-US", "gl": "US", "ceid": "US:en", "area": area}
 
 
-def _note(stories: dict, area: str, item: dict) -> None:
-    """Trägt einen Erstbericht in die Lage des Gebiets ein."""
+def _note(stories: dict, area: str, item: dict, named: bool = True) -> None:
+    """Trägt einen Erstbericht in die Lage des Gebiets ein. named: die Schlagzeile nennt das Gebiet selbst."""
     when = iso(item["when"])
-    story = stories.setdefault(area, {"first": when, "last": when, "domains": {}, "people": None,
+    story = stories.setdefault(area, {"first": when, "last": when, "domains": {}, "named": {}, "people": None,
                                       "nationwide": False, "big": False, "top": item["title"], "active": False})
     story["first"] = min(story["first"], when)
     if when >= story["last"]:
         story["last"], story["top"] = when, item["title"]
     story["domains"][item["domain"]] = max(story["domains"].get(item["domain"], ""), when)
+    if named:
+        story.setdefault("named", {})[item["domain"]] = when
     people = count_people(item["title"])
     if people:
         story["people"] = max(story["people"] or 0, people)
@@ -222,8 +263,20 @@ def _signal(area: str, story: dict, cfg: dict) -> Signal:
                   metrics={"sources": count, "people": people, "nationwide": story["nationwide"]})
 
 
+def _opens(stories: dict, closed: dict, area: str, when, window, settled: bool) -> bool:
+    """Wahr, wenn ein Bericht über Ursache oder Ermittlungen noch zum Beginn eines Ausfalls gehört."""
+    if not settled or area in closed:
+        return False  # Vorgeschichte unbekannt (Neustart) oder Lage dort schon beendet: Aufarbeitung
+    story = stories.get(area)
+    return story is None or when <= parse_ts(story["first"]) + window
+
+
 def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
     stories = cursor.setdefault("stories", {})
+    closed = cursor.setdefault("closed", {})  # Gebiet -> letzter Bericht einer beendeten Lage
+    max_age = timedelta(minutes=cfg["max_age_minutes"])
+    # Nach einem Neustart ist unbekannt, was in den Stunden davor war.
+    settled = now - parse_ts(cursor.setdefault("since", iso(now))) >= max_age
     fixed_queries = cfg.get("priority_queries") or []
     # Gebiete mit eigener Suche: dort reichen weniger Medien
     first_hand = {query["area"]: int(query.get("min_sources", cfg["priority_min_sources"]))
@@ -238,7 +291,6 @@ def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
     plan += [confirm_query(area) for area in (context.get("active_areas") or [])[: cfg["max_areas_per_run"]]]
 
     signals, errors = [], []
-    max_age = timedelta(minutes=cfg["max_age_minutes"])
     for index, query in enumerate(plan):
         if index and PAUSE_SECONDS:
             time.sleep(PAUSE_SECONDS)
@@ -247,38 +299,47 @@ def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
         except (HttpError, ET.ParseError) as err:
             errors.append(f"Google News: {err}")
             continue
-        for item in items:
+        language = query.get("hl", "de")
+        for item in sorted(items, key=lambda entry: entry["when"]):
             title = item["title"]
             if now - item["when"] > max_age or item["when"] > now + timedelta(minutes=10):
                 continue
-            if not relevant(title):
+            if not relevant(title, language):
                 continue
             named = gazetteer.find(title)
             fixed = query.get("area")
             # Nennt die Schlagzeile ein anderes Gebiet als die Suche, gilt die Schlagzeile.
             targets = [fixed] if fixed and (not named or fixed in named) else named
-            lead = is_lead(title)
+            kind = phase(title)
             for area in targets:
+                lead = kind == "lead" or (
+                    kind == "cause" and _opens(stories, closed, area, item["when"], max_age, settled))
                 signals.append(Signal(SOURCE, "news", area, observed_at=item["when"], active=False, detail=title,
                                       url=item["url"], metrics={"domain": item["domain"], "power": True,
                                                                 "lead": lead}))
                 if lead:
-                    _note(stories, area, item)
+                    _note(stories, area, item, named=area in named)
 
     quiet = timedelta(hours=cfg["quiet_hours"])
     for area, story in list(stories.items()):
         last = parse_ts(story["last"])
         if now - last > quiet:
             if story["active"]:
+                closed[area] = story["last"]
                 signals.append(Signal(MEDIA, "media_outage", area, observed_at=now, active=False, severity=0.0,
                                       started_at=parse_ts(story["first"]), ended_at=last,
                                       detail="keine neuen Medienberichte"))
             del stories[area]
             continue
         needed = first_hand.get(area, cfg["world_min_sources"])
-        if story["active"] or len(story["domains"]) >= needed:
+        # Berichte, die das Gebiet selbst nennen, zählen voll. Sonst braucht es ein Medium mehr.
+        enough = len(story.get("named") or {}) >= needed or len(story["domains"]) > needed
+        if story["active"] or enough:
             story["active"] = True
             signals.append(_signal(area, story, cfg))
+    keep = timedelta(days=cfg["followup_days"])
+    for area in [area for area, last in closed.items() if now - parse_ts(last) > keep]:
+        del closed[area]
 
     cursor["note"] = "; ".join(sorted(set(errors)))
     if plan and len(errors) == len(plan):

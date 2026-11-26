@@ -111,6 +111,7 @@ Alle Schwellen stehen in [`config.toml`](config.toml), jeweils mit Erklärung. O
 
 - **Kein Messnetz für Stromausfälle.** Es gibt weltweit keine offene Echtzeit-Quelle für Stromausfälle. Das Programm kombiniert Indizien. Betroffenenzahlen sind grobe Schätzungen.
 - **Medienberichte** belegen, dass etwas passiert ist, aber weder Dauer noch Ende. Ein Ausfall, der nur aus Medien bekannt ist, bekommt deshalb eine Meldung "(laut Medien)" und keine Entwarnung.
+- **Schlagzeilen** entscheiden, ob ein Bericht zählt. Vorsorge, Übungen, Warnungen und Aufarbeitung werden aussortiert, im Deutschen zählt das Wort "Blackout" allein nicht. Für Oberösterreich genügt ein Bericht, dessen Schlagzeile einen Ort in Oberösterreich nennt. Nennt sie keinen Ort, braucht es ein zweites Medium. Ganz ausschließen lassen sich Fehlalarme und übersehene Berichte damit nicht.
 - **Lastdaten kommen 2 bis 3 Stunden verzögert.** Die Zeiten in den Meldungen stimmen, aber Wiederherstellung und Entwarnung erfährt man entsprechend später. Im Ernstfall sind Radio (ORF) und Behörden schneller.
 - **Verlauf innerhalb Österreichs:** Gemessen wird je Land. Welches Bundesland zuerst wieder Strom hat, lässt sich aus offenen Daten nicht ablesen. Für Oberösterreich gibt es nur Medienberichte und die Störmeldungen der LINZ NETZ (Linz und Umgebung).
 - **Wann das Netz wieder läuft**, kann niemand vorhersagen. Die Meldung nennt bei einem Blackout in Österreich den Richtwert der APG aus Simulationen (2021): im besten Fall etwa 10 Stunden, längstens 20 bis 30 Stunden ([ORF](https://orf.at/stories/3230171/)). Eine Studie für das Parlament (2022) nennt 10 bis 24 Stunden bis zu einem voll versorgten Übertragungsnetz ([Trending Topics](https://www.trendingtopics.eu/blackout-oesterreich-studie/)).
@@ -143,7 +144,7 @@ Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anze
 | `blackout_radar/notify.py` | Versand über ntfy und E-Mail mit Wiederholung |
 | `blackout_radar/report.py` | Lagebericht, Statistik, tägliche Übersicht |
 | `blackout_radar/simulate.py` | Planspiel |
-| `tests/` | 98 Tests, laufen ohne Netz: `python3 -m unittest discover -s tests -t .` |
+| `tests/` | Tests, laufen ohne Netz: `python3 -m unittest discover -s tests -t .` |
 | `.github/workflows/monitor.yml` | Lauf alle 5 Minuten, Zustand im Zweig `state` |
 | `.github/workflows/ci.yml` | Tests und Probelauf gegen die echten Datenquellen bei jeder Änderung |
 

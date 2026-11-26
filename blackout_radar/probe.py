@@ -72,27 +72,32 @@ def _flatten(node) -> list:
 
 # ------------------------------------------------------------------ Stromlast
 def probe_load(cfg: dict, now) -> None:
+    """Zeigt je Land die neuesten Lastwerte und den Wert vom Vortag. Unvollständige Meldungen fallen so auf."""
     section = cfg["sources"]["load"]
     base = section["base_url"].rstrip("/")
     for index, country in enumerate(section["countries"]):
         if index:
-            time.sleep(1)
+            time.sleep(4)  # der Dienst begrenzt schnelle Abfragen
         doc = _json(_fetch(f"{base}/v2/public_power", {
-            "country": country, "start": _fmt(now - timedelta(hours=5)), "end": _fmt(now)}))
+            "country": country, "start": _fmt(now - timedelta(hours=30)), "end": _fmt(now)}))
         if not isinstance(doc, dict):
             continue
         rows = doc.get("data") or []
-        loads = [(row.get("timestamp"), (row.get("values") or {}).get("load")) for row in rows]
-        known = [(t, v) for t, v in loads if v]
-        if index == 0:  # das erste Land ausführlich, die übrigen in einer Zeile
+        known = [(parse_ts(row.get("timestamp")), (row.get("values") or {}).get("load")) for row in rows]
+        known = [(when, value) for when, value in known if when and value]
+        if index == 0:  # das erste Land ausführlich
             print("  Kopf:", {k: v for k, v in doc.items() if k not in ("data", "series")})
             print("  Reihen:", outline(doc.get("series"), limit=2))
-            print(f"  {len(rows)} Zeilen, letzte 10 Lastwerte:", loads[-10:])
-        if known:
-            print(f"  {country}: {len(known)} Lastwerte, letzter {known[-1][1]} MW von {known[-1][0]}, "
-                  f"Verzögerung {now - parse_ts(known[-1][0])}")
-        else:
+        if not known:
             print(f"  {country}: KEINE Lastwerte in {len(rows)} Zeilen")
+            continue
+        lookup = dict(known)
+        last_time, last_value = known[-1]
+        values = [value for _, value in known]
+        print(f"  {country}: {len(known)} Werte, kleinster {min(values):.0f}, größter {max(values):.0f} MW, "
+              f"Verzögerung {now - last_time}")
+        print("    neueste:", ", ".join(f"{when.strftime('%H:%M')} {value:.0f}" for when, value in known[-6:]),
+              "| Vortag zur selben Zeit:", lookup.get(last_time - timedelta(days=1)))
 
 
 # --------------------------------------------------------------- Netzfrequenz
@@ -177,12 +182,14 @@ def _headlines(query: dict, now, limit: int) -> None:
     except (HttpError, ET.ParseError) as err:
         print(f"  FEHLER: {err}")
         return
+    language = query.get("hl", "de")
+    kinds = {"lead": "Erstbericht", "cause": "Ursache", "follow": "Aufarbeitung"}
     items.sort(key=lambda item: item["when"], reverse=True)
-    hits = sum(1 for item in items if news.relevant(item["title"]))
+    hits = sum(1 for item in items if news.relevant(item["title"], language))
     print(f"  {len(items)} Einträge, davon {hits} über einen Stromausfall")
     for item in items[:limit]:
         title = item["title"]
-        kind = "–" if not news.relevant(title) else "Erstbericht" if news.is_lead(title) else "Folgebericht"
+        kind = kinds[news.phase(title)] if news.relevant(title, language) else "–"
         people = news.count_people(title)
         age = int((now - item["when"]).total_seconds() // 60)
         print(f"    vor {age:>4} min | {kind:<12} | {','.join(gazetteer.find(title)) or '?':<10} "

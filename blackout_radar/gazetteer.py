@@ -2,7 +2,9 @@
 
 Dient nur dazu, einen Medienbericht einem Staat zuzuordnen (für Oberösterreich
 auch dem Bundesland). Die Liste ist bewusst grob. Mehrdeutige Namen fehlen
-absichtlich, zum Beispiel Georgia (Staat und US-Bundesstaat), Jordan, Chad, Niger.
+absichtlich, zum Beispiel Georgia (Staat und US-Bundesstaat), Jordan, Chad, Niger. Städte, die es
+auch in den USA gibt (Naples, Venice, St. Petersburg, Melbourne, Odessa), stehen nur in der
+Schreibweise ihres Landes in der Liste.
 """
 from __future__ import annotations
 
@@ -18,13 +20,13 @@ AT-4: Oberösterreich|Upper Austria|Linz|Wels|Steyr|Mühlviertel|Innviertel|Trau
 AT: Austrian|Autriche|Wien|Vienna|Graz|Salzburg|Innsbruck|Klagenfurt|Tirol|Tyrol|Steiermark|Kärnten|Vorarlberg|Burgenland|Niederösterreich
 DE: German|Allemagne|Alemania|Germania|Berlin|München|Munich|Hamburg|Frankfurt|Köln|Cologne|Stuttgart|Bayern|Bavaria
 CH: Swiss|Suisse|Suiza|Svizzera|Zürich|Zurich|Genf|Geneva|Genève|Basel
-IT: Italian|Italia|Italie|Rom|Rome|Roma|Milan|Milano|Mailand|Naples|Napoli|Neapel|Turin|Torino|Sicily|Sicilia|Sizilien|Sardinia|Sardegna|Sardinien|Südtirol|Venedig|Venice|Venezia
+IT: Italian|Italia|Italie|Rom|Rome|Roma|Milano|Mailand|Napoli|Neapel|Turin|Torino|Sicily|Sicilia|Sizilien|Sardinia|Sardegna|Sardinien|Südtirol|Venedig|Venezia
 FR: French|Francia|França|Paris|Marseille|Lyon|Toulouse|Bordeaux|Cannes
 ES: España|Spanish|Espagne|Spagna|Espanha|Madrid|Barcelona|Sevilla|Seville|Andalucía|Cataluña|Catalonia|Canarias|Canary Islands|Kanaren|Tenerife|Teneriffa|Mallorca
-PT: Portuguese|Lisbon|Lisboa|Lissabon
-GB: Britain|UK|U.K.|England|Scotland|Wales|Northern Ireland|London|Manchester|Heathrow|Großbritannien|Schottland|Royaume-Uni|Reino Unido|Gran Bretaña
+PT: Portuguese|Portogallo|Lisbon|Lisboa|Lissabon
+GB: Britain|UK|U.K.|England|Scotland|Wales|Northern Ireland|London|Heathrow|Großbritannien|Schottland|Royaume-Uni|Reino Unido|Gran Bretaña
 IE: Irish|Dublin
-NL: Dutch|Holland|Pays-Bas|Países Bajos|Amsterdam|Rotterdam
+NL: Dutch|Pays-Bas|Países Bajos|Amsterdam|Rotterdam
 BE: Belgian|Belgique|Bélgica|Brussels|Brüssel|Bruxelles
 DK: Danish|Copenhagen|Kopenhagen
 SE: Swedish|Stockholm
@@ -46,8 +48,9 @@ GR: Greek|Grèce|Grecia|Athens|Athen|Thessaloniki|Crete|Kreta
 BG: Bulgarian|Sofia
 RO: Romanian|Bucharest|Bukarest
 MD: Moldovan|Chisinau|Chișinău|Transnistria|Transnistrien
-UA: Ukrainian|Ucrania|Kyiv|Kiev|Kiew|Kharkiv|Charkiw|Odesa|Odessa|Dnipro|Lviv|Lwiw|Zaporizhzhia|Saporischschja|Kherson|Cherson|Mykolaiv
-RU: Rusia|Russie|Moscow|Moskau|St. Petersburg|Saint Petersburg|Belgorod
+UA: Ukrainian|Ucrania|Kyiv|Kiev|Kiew|Kharkiv|Charkiw|Odesa|Dnipro|Lviv|Lwiw|Zaporizhzhia|Saporischschja|Kherson|Cherson|Mykolaiv
+UA-43: Crimea|Crimean|Krim|Crimée|Crimeia|Sevastopol|Sewastopol|Simferopol
+RU: Rusia|Russie|Moscow|Moskau|Sankt Petersburg|Belgorod
 BY: Belarusian|Minsk
 LT: Lithuanian|Vilnius
 LV: Latvian|Riga
@@ -67,7 +70,7 @@ YE: Yemeni|Sanaa|Aden
 JO: Amman
 EG: Egyptian|Egipto|Égypte|Cairo|Kairo
 LY: Libyan|Tripoli|Tripolis|Benghazi
-TN: Tunisian|Tunis
+TN: Tunisian|Tunisie|Tunis
 DZ: Algerian|Algérie|Argelia|Algiers|Algier
 MA: Moroccan|Maroc|Marruecos|Casablanca|Rabat
 NG: Nigerian|Lagos|Abuja
@@ -82,10 +85,10 @@ ZW: Zimbabwean|Harare
 ZM: Zambian|Lusaka
 MZ: Mozambican|Maputo
 AO: Angolan|Luanda
-CD: DR Congo|DRC|Kinshasa
-SN: Senegalese|Dakar
+CD: DR Congo|DRC|RDC|Kinshasa
+SN: Senegalese|Sénégal|Dakar
 CI: Ivory Coast|Côte d'Ivoire|Abidjan
-CM: Cameroonian|Yaoundé|Douala
+CM: Cameroonian|Cameroun|Yaoundé|Douala
 ML: Bamako
 MW: Malawian|Lilongwe
 MG: Antananarivo
@@ -115,16 +118,16 @@ TJ: Tajik|Dushanbe
 AZ: Azerbaijani|Baku
 AM: Armenian|Yerevan|Eriwan
 GE: Tbilisi|Tiflis
-AU: Australian|Sydney|Melbourne|Brisbane|Perth|Adelaide|Queensland|New South Wales|Tasmania|Western Australia|South Australia
-NZ: Auckland|Wellington|Christchurch
-US: United States|Estados Unidos|États-Unis|Texas|California|Kalifornien|Florida|New York|Louisiana|Michigan|Ohio|Pennsylvania|Illinois|North Carolina|South Carolina|Virginia|Tennessee|Kentucky|Alabama|Mississippi|Oklahoma|Arkansas|Missouri|Wisconsin|Minnesota|Colorado|Arizona|Nevada|Oregon|Massachusetts|New Jersey|Maryland|Hawaii|Alaska|Houston|Dallas|Chicago|Los Angeles|San Francisco|San Diego|Seattle|Miami|Atlanta|Detroit|Boston|Philadelphia|New Orleans|Las Vegas
+AU: Australian|Sydney|Brisbane|Adelaide|Queensland|New South Wales|Tasmania|Western Australia|South Australia
+NZ: Auckland|Christchurch
+US: United States|Estados Unidos|États-Unis|New Mexico|New England|Panama City|Texas|California|Kalifornien|Florida|New York|Louisiana|Michigan|Ohio|Pennsylvania|Illinois|North Carolina|South Carolina|Virginia|Tennessee|Kentucky|Alabama|Mississippi|Oklahoma|Arkansas|Missouri|Wisconsin|Minnesota|Colorado|Arizona|Nevada|Oregon|Massachusetts|New Jersey|Maryland|Hawaii|Alaska|Houston|Dallas|Chicago|Los Angeles|San Francisco|San Diego|Seattle|Miami|Atlanta|Detroit|Boston|Philadelphia|New Orleans|Las Vegas
 CA: Canadian|Canadá|Ontario|Quebec|Québec|British Columbia|Alberta|Manitoba|Nova Scotia|Toronto|Montreal|Montréal|Vancouver|Calgary|Ottawa
 MX: México|Mexique|Mexican|Mexico City|Ciudad de México|Yucatán|Nuevo León|Monterrey|Guadalajara
 CU: Cuban|La Habana|Havana|Havanna
 DO: República Dominicana|Dominican Republic|Santo Domingo
 HT: Haïti|Haití
 VE: Venezuelan|Caracas|Maracaibo
-CO: Colombian|Bogotá|Bogota|Medellín
+CO: Colombian|Colômbia|Bogotá|Bogota|Medellín
 EC: Ecuadorian|Quito|Guayaquil
 PE: Perú|Peruvian
 BO: Bolivian
@@ -152,7 +155,7 @@ def _build():
     names: dict[str, str] = {}
     for code, (german, english, _) in {**areas.COUNTRIES, **areas.REGIONS}.items():
         if code in areas.REGIONS and code != "AT-4":
-            continue  # die übrigen Bundesländer zählen als Österreich (siehe unten)
+            continue  # übrige Teilgebiete kommen nur über die Liste oben (Bundesländer zählen als Österreich)
         for name in (german, english):
             if name not in SKIP:
                 names.setdefault(name, code)
@@ -163,7 +166,7 @@ def _build():
                 names[name.strip()] = code.strip()
     known = {name: code for name, code in names.items() if code in areas.COUNTRIES or code in areas.REGIONS}
     pattern = "|".join(re.escape(name) for name in sorted(known, key=len, reverse=True))
-    return known, re.compile(rf"(?<!\w)(?:{pattern})(?!\w)(?!-(?:led|backed|based|built|made|style|owned|born)\b)")
+    return known, re.compile(rf"(?<!\w)(?:{pattern})(?!\w)(?!-(?:led|backed|based|built|made|style|owned|born|installed|controlled|occupied|annexed|held|appointed|linked|aligned)\b)")
 
 
 _NAMES, _PATTERN = _build()

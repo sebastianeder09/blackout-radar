@@ -10,16 +10,19 @@ from . import areas
 from .collectors import frequency
 from .engine import Engine
 from .model import Message, fmt_duration, fmt_pct, iso, parse_ts
+from .model import fmt_number as number
+from .model import fmt_people as people
 
 SOURCE_NAMES = {
     "frequency": "Netzfrequenz",
     "load": "Stromlast (Energy-Charts, Daten von ENTSO-E)",
     "ioda": "Internet-Ausfälle (IODA)",
     "cloudflare": "Cloudflare Radar",
-    "news": "Medien (Google News, GDELT)",
+    "utility": "Störmeldungen LINZ NETZ",
+    "news": "Medien (Google News)",
 }
 SOURCE_SHORT = {"frequency": "Netzfrequenz", "load": "Stromlast", "ioda": "IODA",
-                "cloudflare": "Cloudflare", "news": "Medien"}
+                "cloudflare": "Cloudflare", "utility": "LINZ NETZ", "news": "Medien"}
 CHANNEL_NAMES = {"ntfy": "ntfy", "email": "E-Mail"}
 WEEKDAYS = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
 WINDOWS = ((1, "24 Stunden"), (7, "7 Tage"), (30, "30 Tage"), (90, "90 Tage"))
@@ -29,26 +32,17 @@ BACKGROUND = """## Einordnung
 - **Blackout**: unerwarteter, großflächiger und überregionaler Stromausfall. Hier so eingestuft, wenn mindestens die Hälfte eines Gebiets betroffen ist.
 - **Brownout**: Spannung oder Versorgung wird abgesenkt oder Verbraucher werden gezielt abgeschaltet (Lastabwurf), um einen Blackout zu verhindern.
 - **Netzfrequenz**: Soll 50,00 Hz. Ab 49,8 Hz werden Reserven aktiviert, ab 49,0 Hz schaltet das Netz automatisch Verbraucher ab, bei 47,5 Hz trennen sich Kraftwerke vom Netz.
-- **Netzwiederaufbau Österreich**: Schwarzstartfähige Kraftwerke (vor allem Speicherkraftwerke) bauen Netzinseln auf, die Schritt für Schritt zusammengeschaltet werden. Richtwert der APG aus Übungen: 10 bis 24 Stunden, bis das Übertragungsnetz wieder steht. Das ist ein Richtwert und keine Prognose.
-- **Grenzen dieser Übersicht**: Internet-Ausfälle sind ein Indiz und kein Beweis für einen Stromausfall. Lastdaten kommen mit rund zwei Stunden Verzögerung. Betroffenenzahlen sind grobe Schätzungen (Anteil mal Einwohner).
+- **Netzwiederaufbau Österreich**: Schwarzstartfähige Kraftwerke (vor allem Speicherkraftwerke) bauen Netzinseln auf, die Schritt für Schritt zusammengeschaltet werden. Richtwerte: Die APG nannte 2021 aus ihren Simulationen im besten Fall etwa 10 Stunden und längstens 20 bis 30 Stunden, bis die Versorgung wieder läuft. Eine Studie für das Parlament (2022) nennt 10 bis 24 Stunden bis zu einem voll versorgten Übertragungsnetz. Das sind Richtwerte und keine Prognose.
+- **Grenzen dieser Übersicht**: Medienberichte belegen einen Ausfall, aber weder Dauer noch Ende. Lastdaten kommen mit zwei bis drei Stunden Verzögerung, die Zeiten daraus stimmen aber. Betroffenenzahlen sind grobe Schätzungen (Zahlen aus Schlagzeilen oder Anteil mal Einwohner).
 """
-CREDITS = ("Datenquellen: Energy-Charts (Fraunhofer ISE, CC BY 4.0), netzfrequenzmessung.de, "
-           "IODA (Georgia Tech), Google News, GDELT.")
+CREDITS = ("Datenquellen: Energy-Charts (Fraunhofer ISE, CC BY 4.0, energy-charts.info), "
+           "netzfrequenzmessung.de, Google News, Störmeldungen der LINZ NETZ GmbH, "
+           "optional IODA (Georgia Tech) und Cloudflare Radar.")
 
 
 def md(text: str) -> str:
     """Entschärft Zeichen, die eine Markdown-Tabelle oder einen Link zerbrechen würden."""
     return str(text).replace("|", "/").replace("[", "(").replace("]", ")").replace("\n", " ").strip()
-
-
-def number(value: float) -> str:
-    return f"{value:,.0f}".replace(",", ".")
-
-
-def people(value: float) -> str:
-    if value >= 1_000_000:
-        return f"{value / 1_000_000:.1f}".replace(".", ",") + " Mio."
-    return number(round(value, -3))
 
 
 class Report:
@@ -99,6 +93,7 @@ class Report:
                 "class": self.engine.classify(event) if event["kind"] == "outage" else "Netzfrequenz",
                 "confirmed": any(i["confirmed_power"] for i in incidents.values()),
                 "impact": round(self.engine.impact(event)),
+                "media_only": event["kind"] == "outage" and self.engine.media_only(event),
             })
         rows.sort(key=lambda row: row["started_at"], reverse=True)
         return rows
@@ -109,7 +104,8 @@ class Report:
             since = iso(self.now - timedelta(days=days))
             chosen = [r for r in rows if r["started_at"] >= since or not r["ended_at"] or r["ended_at"] >= since]
             outages = [r for r in chosen if r["kind"] == "outage"]
-            longest = max(outages, key=self.duration, default=None)
+            # Für Ausfälle, die nur aus Medienberichten bekannt sind, gibt es keine belegte Dauer.
+            longest = max((r for r in outages if not r.get("media_only")), key=self.duration, default=None)
             result.append({
                 "days": days, "label": label, "outages": len(outages),
                 "frequency_alarms": sum(1 for r in chosen if r["kind"] == "frequency"),
@@ -165,13 +161,19 @@ class Report:
         engine, now = self.engine, self.now
         order = sorted(event["incidents"].values(), key=lambda i: i["started_at"])
         start, end = parse_ts(event["started_at"]), parse_ts(event["ended_at"])
-        lines = [f"### {'🟢' if end else '🔴'} {md(engine.headline(event))}", ""]
-        if end:
+        media_only = event["kind"] == "outage" and engine.media_only(event)
+        icon = "🔴" if not end else "⚪" if media_only else "🟢"
+        lines = [f"### {icon} {md(engine.headline(event))}", ""]
+        if media_only:
+            text = (f"Erster Medienbericht um {self.clock(start)} Uhr. "
+                    "Dauer und Ende lassen sich aus Medienberichten nicht ablesen.")
+        elif end:
             text = f"Beginn {self.clock(start)}, Ende {self.clock(end)}, Dauer {fmt_duration(end - start)}."
         else:
             text = f"Seit {self.clock(start)} Uhr, Dauer bisher {fmt_duration(now - start)}."
-        if event["kind"] == "outage":
-            text += f" Größenordnung: rund {people(engine.impact(event))} Betroffene."
+        impact = engine.impact(event) if event["kind"] == "outage" else 0
+        if impact >= 100:
+            text += f" Größenordnung: rund {people(impact)} Betroffene."
         lines += [text, ""]
         lines += [f"- {md(engine.area_line(inc, now))}" for inc in order]
         lines += [""] + [f"{md(line)}  " for line in engine.course_lines(event, now)]
@@ -241,10 +243,14 @@ class Report:
         if history:
             lines += ["### Letzte Ereignisse", "", "| Beginn | Dauer | Gebiete | Art | Spitze |", "|---|---|---|---|---|"]
             for row in history[:15]:
-                duration = fmt_duration(self.duration(row)) + ("" if row["ended_at"] else " (läuft)")
+                if row.get("media_only"):
+                    duration, kind = "nicht belegt", f"{row['class']} (laut Medien)"
+                else:
+                    duration = fmt_duration(self.duration(row)) + ("" if row["ended_at"] else " (läuft)")
+                    kind = row["class"]
                 peak = fmt_pct(row["peak"]) if row.get("peak") and row["kind"] == "outage" else "–"
                 lines.append(f"| {self.clock(parse_ts(row['started_at']))} | {duration} "
-                             f"| {md(engine.names(row['areas']))} | {md(row['class'])} | {peak} |")
+                             f"| {md(engine.names(row['areas']))} | {md(kind)} | {peak} |")
             lines.append("")
         lines += ["## Datenquellen", "", "| Quelle | Zustand | Datenstand | Hinweis |", "|---|---|---|---|"]
         for row in self.sources():
@@ -311,7 +317,8 @@ class Report:
         recent = [r for r in self.history() if r["ended_at"] and r["ended_at"] >= since and r["kind"] == "outage"]
         if recent:
             lines.append("Letzte 24 Stunden beendet: " + "; ".join(
-                f"{engine.names(r['areas'])} ({fmt_duration(self.duration(r))})" for r in recent[:4]))
+                f"{engine.names(r['areas'])} "
+                f"({'laut Medien' if r.get('media_only') else fmt_duration(self.duration(r))})" for r in recent[:4]))
         elif not active and not first:
             lines.append("Letzte 24 Stunden: keine gemeldeten Stromausfälle.")
         stats = {row["days"]: row for row in self.statistics()}
@@ -332,7 +339,7 @@ class Report:
         if book.get("runs") and not first:
             pause = fmt_duration(timedelta(seconds=book.get("max_gap_s") or 0))
             lines.append(f"Überwachung: {book['runs']} Läufe seit dem letzten Lagebericht, längste Pause {pause}.")
-        key = f"daily:{now.astimezone(self.tz).date().isoformat()}"
+        key = f"{'hello' if first else 'daily'}:{now.astimezone(self.tz).date().isoformat()}"
         return Message(title, "\n".join(lines), "daily" if not first else "info", key, self.cfg.get("status_url", ""))
 
 

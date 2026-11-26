@@ -38,7 +38,7 @@ def fetch_load(base: str, country: str, now) -> list:
     for row in doc.get("data") or []:
         value = (row.get("values") or {}).get("load")
         when = parse_ts(row.get("timestamp"))
-        if value is not None and when is not None:
+        if value and when is not None and float(value) > 0:  # 0 steht für fehlende Werte
             points.append([iso(when), float(value)])
     if not points:
         raise HttpError(f"keine Lastdaten für {country}")
@@ -149,7 +149,8 @@ def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
             fetched += 1
         except HttpError as err:
             errors.append(f"{country}: {err}")
-            minutes = 20 if err.status == 429 else 5
+            # Land unbekannt oder gesperrt: selten erneut versuchen, damit die anderen an die Reihe kommen
+            minutes = 360 if err.status in (400, 403, 404, 422) else 20 if err.status == 429 else 10
         plan[country] = iso(now + timedelta(minutes=minutes))
 
     signals, newest, latest = [], None, {}
@@ -160,7 +161,8 @@ def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
         signals += analyse(country, points, events, cfg, now)
         last = parse_ts(points[-1][0])
         newest = last if newest is None else max(newest, last)
-        latest[area_code(country)] = {"t": points[-1][0], "mw": points[-1][1]}
+        day_before = dict(points).get(iso(last - timedelta(days=1)))
+        latest[area_code(country)] = {"t": points[-1][0], "mw": points[-1][1], "ref_mw": day_before}
     cursor["latest"] = latest
     cursor["data_time"] = iso(newest)
     cursor["note"] = "; ".join(errors)

@@ -1,107 +1,287 @@
-"""Medienberichte: bestätigen, dass Strom die Ursache ist, und liefern Hintergründe.
+"""Medienberichte über Stromausfälle (Google News, RSS-Suche).
 
-  Google News (RSS)  feste Suchen für Vorrang-Gebiete, z. B. Oberösterreich
-  GDELT              weltweite Nachrichtensuche zu Gebieten, in denen gerade eine Störung läuft
+Drei Suchen:
+  Vorrang    feste Suchen für Vorrang-Gebiete (Oberösterreich, Österreich). Für Oberösterreich
+             zählt schon ein Bericht.
+  Welt       Suche nach großen Ausfällen in mehreren Sprachen. Das Gebiet wird aus der
+             Schlagzeile gelesen. Es zählt erst, wenn mehrere Medien berichten.
+  Nachweis   gezielte Suche zu Gebieten, in denen ein Messsignal anschlägt.
+
+Aus den Berichten je Gebiet entsteht ein Medien-Signal (media_outage) mit geschätzter
+Größe: Zahlen aus der Schlagzeile ("20.000 Haushalte"), "landesweit" oder die Breite der
+Berichterstattung. Folgeberichte (Ermittlungen, Ursachen, Wiederherstellung) und Warnungen,
+Übungen oder geplante Abschaltungen lösen nichts aus.
+
+Die RSS-Suche von Google News ist für Feed-Leser gedacht und nicht garantiert. Dieses
+Programm fragt sie sparsam ab (wenige Suchen je Lauf).
 """
 from __future__ import annotations
 
 import re
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import timedelta
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlsplit
 
-from .. import areas, http
+from .. import areas, gazetteer, http
 from ..http import HttpError
-from ..model import UTC, Signal, iso, parse_ts
+from ..model import UTC, Signal, fmt_people, iso, parse_ts
 
-SOURCE = "news"
+SOURCE = "news"   # einzelner Bericht
+MEDIA = "media"   # verdichtetes Signal je Gebiet
+GOOGLE_NEWS = "https://news.google.com/rss/search"
+PAUSE_SECONDS = 1.0  # Abstand zwischen zwei Suchen
+
 POWER_WORDS = re.compile(
-    r"blackout|power outage|power cut|outage|without power|electricity|load.?shedding|"
-    r"stromausfall|stromausfälle|ohne strom|stromversorgung|strom weg|"
-    r"apag[oó]n|corte de luz|corte de energ|apag[aã]o|panne de courant|panne d.électricité|"
-    r"coupure de courant|stroomstoring|stroomuitval|strømbrud|strömavbrott|awaria prądu|"
-    r"výpadek proudu|áramszünet|pană de curent|elektrik kesintisi|отключени|блэкаут|"
-    r"відключенн|انقطاع الكهرباء|停电|停電|정전|mất điện|pemadaman listrik", re.IGNORECASE)
+    r"blackout|black-out|power outages?|power cuts?|power failure|without power|without electricity|"
+    r"(?:loses?|lost) power|grid collaps|grid fail|plunged into darkness|"
+    r"stromausf[aä]ll|stromstörung|stromunterbrechung|ohne strom|strom weg|kein strom|"
+    r"apag[oó]n|apagones|cortes? de luz|cortes? de energ|sin luz|sin energ[ií]a|sin electricidad|"
+    r"colapso (?:del sistema )?el[eé]ctrico|apag[aã]o|apagões|sem energia|sem luz|"
+    r"panne de courant|panne d.électricité|panne géante|coupure de courant|coupure d.électricité|sans électricité|"
+    r"senza corrente|senza elettricità|stroomstoring|stroomuitval|strømbrud|strömavbrott|awaria prądu|"
+    r"výpadek proudu|áramszünet|pană de curent|elektrik kesintisi|отключени|блэкаут|відключенн|"
+    r"انقطاع الكهرباء|停电|停電|정전|mất điện|pemadaman listrik", re.IGNORECASE)
+
+# Zählt nie: Vorsorge und Übungen, Warnungen, geplante Abschaltungen, Romane und Filme,
+# "Blackout" im übertragenen Sinn
 EXCLUDE = re.compile(
-    r"vorsorge|übung|ratgeber|was tun|jahrestag|planspiel|simulation|checkliste|podcast|quiz|"
-    r"testalarm|probealarm|vortrag|infoabend|blackout-gefahr|wie wahrscheinlich|"
-    r"preparedness|drill|anniversary|how to prepare", re.IGNORECASE)
-GDELT_TERMS = '(blackout OR "power outage" OR "power cut" OR Stromausfall OR apagón OR "load shedding")'
+    r"vorsorge|übung|ratgeber|was tun|jahrestag|planspiel|simulation|checkliste|podcast|quiz|testalarm|"
+    r"probealarm|vortrag|infoabend|blackout-gefahr|wie wahrscheinlich|notfallplan|vorbereit|"
+    r"preparedness|\bdrill|anniversary|how to prepare|simulacro|aniversario|"
+    r"\b(?:threatens?|could|might|warns?|warning|risk of|at risk|fears?|looms?|braces?|plans? for|"
+    r"droht|drohen|könnte|warnt|warnung|riesgo|podría|advierte|amenaza|peligro|risque|pourrait|rischio)\b|"
+    r"geplant|angekündigt|wartungsarbeit|scheduled|planned|programad|preventivo|mantenimiento|horarios|"
+    r"colonias|maintenance|rolling blackouts?|load.?shedding|"
+    r"thriller|\broman\b|elsberg|spielfilm|kinofilm|hörspiel|\bkrimi\b|\bdoku\b|dokumentation|tv-tipp|buchtipp|"
+    r"streaming|\bnovel\b|\bmovie\b|\bfilm\b|book review|"
+    r"(?:media|news|internet|communications?|information|tv|broadcast|radio|digital|sports?) blackout|"
+    r"blackout (?:tuesday|wednesday|friday|challenge|dates?|curtains?|blinds?|restrictions?|rules?|policy)|"
+    r"\b(?:nfl|nba|mlb|nhl)\b|"
+    r"apagón (?:informativo|digital|analógico|mediático|de internet)|"
+    r"microsoft|cloud|\baws\b|azure|playstation|xbox|whatsapp|instagram|facebook|netflix|youtube|"
+    r"airspace|skies|internetausfall|mobilfunk", re.IGNORECASE)
+
+# Zählt als Bericht, löst aber nichts aus: Aufarbeitung, Ursachen, Wiederherstellung
+FOLLOWUP = re.compile(
+    r"^nach\b.*(?:stromausfall|stromstörung|blackout)|ermittel|ermittlung|staatsschutz|sabotage|"
+    r"sachbeschädigung|vorsatz|anschlag|ursache|rätsel|bilanz|konsequenz|entschädigung|prozess|urteil|"
+    r"gericht|festgenommen|verdächtig|rückblick|analyse|kommentar|interview|\bschutz|lehren|aufarbeitung|"
+    r"tag danach|nachwehen|chronologie|protokoll einer|so erlebte|"
+    r"wieder (?:da|hergestellt|versorgt|am netz)|behoben|entwarnung|"
+    r"^after\b.*(?:blackout|outage)|restor|back online|power returns|power is back|investigat|inquiry|"
+    r"\bprobe\b|report finds|lessons|year after|explained|what caused|caused by|blam(?:es|ed|ing)|"
+    r"compensation|lawsuit|\bcourt\b|aftermath|recover|death toll|timeline|"
+    r"restablec|restitu|vuelve la luz|regresa la luz|recupera|investig|hipótesis|causas? del|responsables|"
+    r"tras el (?:último |gran |masivo )?apagón|después del apagón|donde comenzó|exigirá|pronunciamiento|"
+    r"atribu[iy]e?|restabelec|após o apagão|depois do apagão|causas? do|"
+    r"rétabli|enquête|après la panne|ripristin|indagin|dopo il (?:maxi[- ])?blackout", re.IGNORECASE)
+
+NATIONWIDE = re.compile(
+    r"nationwide|countrywide|country-wide|entire country|whole country|across the country|entire island|"
+    r"island-?wide|national (?:electric |electrical |power |electricity )?grid collaps|grid collapse|"
+    r"total blackout|complete blackout|completely without power|landesweit|bundesweit|im ganzen land|"
+    r"ganz \w+ ohne strom|todo el país|a nivel nacional|apagón (?:nacional|general|total)|"
+    r"colapso (?:total|del sistema)|tout le pays|em todo o país|apagão (?:nacional|geral)|"
+    r"in tutto il paese", re.IGNORECASE)
+
+# Wörter, die einen Ausfall als groß beschreiben, ohne eine Zahl zu nennen
+BIG_WORDS = re.compile(
+    r"massive|major|widespread|huge|vast|large-scale|sweeping|großflächig|flächendeckend|massiv|riesig|"
+    r"masivo|generalizado|gran apagón|mega ?apagón|géante|généralisée|grande apagão|maxi[- ]?blackout|"
+    r"großer stromausfall|großen stromausfall", re.IGNORECASE)
+
+_HOUSEHOLDS = (r"haushalte|households|homes|customers|kunden|anlagen|clientes|usuarios|hogares|abonnés|"
+               r"foyers|utenti|famiglie")
+_PERSONS = r"menschen|people|personen|einwohner|residents|personas|habitantes|pessoas|personnes|persone"
+_MONEY = r"(?!\s*(?:de\s+)?(?:euros?|dollars?|dólares|usd|eur|€|\$|pesos|reais|pounds?|franken))"
+_MILLION = re.compile(
+    rf"(\d+(?:[.,]\d+)?)\s*(?:million|millionen|mio\.?|millones|milhões|millions|milioni)\b{_MONEY}"
+    rf"(?:\s+(?:de\s+|d')?({_HOUSEHOLDS}))?", re.IGNORECASE)
+_COUNT = re.compile(rf"(\d{{1,3}}(?:[.,\s]\d{{3}})+|\d{{4,7}})\s*({_HOUSEHOLDS}|{_PERSONS})", re.IGNORECASE)
+_HOUSEHOLD_WORD = re.compile(_HOUSEHOLDS, re.IGNORECASE)
+# Mengenangaben in Worten, größte zuerst. Die Werte sind vorsichtige Untergrenzen.
+_WORD_COUNTS = (
+    (re.compile(rf"\b(?:millions|millionen|millones|milhões|milioni)\b{_MONEY}", re.IGNORECASE), 2_000_000),
+    (re.compile(r"half a million|halbe million|medio millón|meio milhão", re.IGNORECASE), 500_000),
+    (re.compile(r"hundreds of thousands|hunderttausende|cientos de miles|centenares de miles|"
+                r"centenas de milhares|centaines de milliers|centinaia di migliaia", re.IGNORECASE), 200_000),
+    (re.compile(r"tens of thousands|zehntausende|decenas de miles|dezenas de milhares|"
+                r"dizaines de milliers|decine di migliaia", re.IGNORECASE), 20_000),
+    (re.compile(r"\b(?:thousands|tausende|miles de|milhares|milliers|migliaia)\b", re.IGNORECASE), 2_000),
+)
+
+GERMAN = {"AT", "DE", "CH", "LI"}
+SPANISH = {"ES", "MX", "AR", "CL", "CO", "PE", "VE", "EC", "BO", "PY", "UY", "CU", "DO", "PA", "HN", "GT",
+           "NI", "CR", "SV", "PR"}
 
 
-def _key(title: str) -> str:
-    return re.sub(r"\W+", " ", title.lower()).strip()[:120]
+def count_people(title: str) -> int | None:
+    """Liest eine Betroffenenzahl aus einer Schlagzeile. Ein Haushalt oder Kunde zählt als zwei Menschen."""
+    best = 0
+    for match in _MILLION.finditer(title):
+        value = float(match.group(1).replace(",", "."))
+        best = max(best, int(value * 1_000_000 * (2 if match.group(2) else 1)))
+    for match in _COUNT.finditer(title):
+        value = int(re.sub(r"\D", "", match.group(1)))
+        best = max(best, value * (2 if _HOUSEHOLD_WORD.fullmatch(match.group(2)) else 1))
+    if not best:
+        for pattern, value in _WORD_COUNTS:
+            if pattern.search(title):
+                best = value
+                break
+    return best or None
 
 
-def google_news(query: dict, cfg: dict, now) -> list[Signal]:
-    language, country = query.get("hl", "de"), query.get("gl", "AT")
-    text = http.get_text("https://news.google.com/rss/search", timeout=20, params={
-        "q": query["q"] + " when:1d", "hl": language, "gl": country, "ceid": f"{country}:{language}"})
-    root = ET.fromstring(text)
-    max_age = timedelta(minutes=cfg["max_age_minutes"])
-    signals = []
-    for item in root.iter("item"):
-        title = (item.findtext("title") or "").strip()
-        source = (item.findtext("source") or "").strip()
+def relevant(title: str) -> bool:
+    """Wahr, wenn eine Schlagzeile von einem tatsächlichen Stromausfall handelt."""
+    return bool(POWER_WORDS.search(title)) and not EXCLUDE.search(title)
+
+
+def is_lead(title: str) -> bool:
+    """Wahr für einen Erstbericht, falsch für Aufarbeitung, Ursachen oder Wiederherstellung."""
+    return not FOLLOWUP.search(title)
+
+
+def fetch(query: str, language: str, country: str, edition: str | None = None) -> list[dict]:
+    text = http.get_text(GOOGLE_NEWS, timeout=20, params={
+        "q": query, "hl": language, "gl": country, "ceid": edition or f"{country}:{language}"})
+    items = []
+    for node in ET.fromstring(text).iter("item"):
+        title = (node.findtext("title") or "").strip()
+        source = node.find("source")
+        name = (source.text or "").strip() if source is not None else ""
+        site = urlsplit(source.get("url") or "").netloc.removeprefix("www.") if source is not None else ""
         try:
-            when = parsedate_to_datetime(item.findtext("pubDate") or "")
+            when = parsedate_to_datetime(node.findtext("pubDate") or "")
         except (TypeError, ValueError):
             continue
         if when.tzinfo is None:
             when = when.replace(tzinfo=UTC)
-        if source and title.endswith(" - " + source):
-            title = title[: -len(source) - 3]
-        if now - when > max_age or when > now + timedelta(minutes=10):
-            continue
-        if not POWER_WORDS.search(title) or EXCLUDE.search(title):
-            continue
-        signals.append(Signal(SOURCE, "news", query["area"], observed_at=when, active=False, detail=title,
-                              url=(item.findtext("link") or "").strip(),
-                              metrics={"domain": source, "power": True, "key": _key(title)}))
-    return signals
+        if name and title.endswith(" - " + name):
+            title = title[: -len(name) - 3].strip()
+        items.append({"title": title, "domain": site or name or "?", "when": when,
+                      "url": (node.findtext("link") or "").strip()})
+    return items
 
 
-def gdelt(cfg: dict, area: str, now) -> list[Signal]:
+def confirm_query(area: str) -> dict:
+    """Suche, die zu einem Gebiet mit Messsignal Berichte über einen Stromausfall findet."""
+    parent = areas.parent(area)
     names = " OR ".join(f'"{name}"' for name in areas.search_names(area))
-    doc = http.get_json(cfg["gdelt_url"], timeout=30, params={
-        "query": f"{GDELT_TERMS} ({names})", "mode": "artlist", "format": "json",
-        "timespan": f"{cfg['max_age_minutes']}min", "maxrecords": 25, "sort": "datedesc"})
-    signals = []
-    for article in doc.get("articles") or []:
-        title = (article.get("title") or "").strip()
-        try:
-            when = datetime.strptime(article.get("seendate") or "", "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
-        except ValueError:
-            when = now
-        if not title or not POWER_WORDS.search(title) or EXCLUDE.search(title):
-            continue
-        signals.append(Signal(SOURCE, "news", area, observed_at=when, active=False, detail=title,
-                              url=article.get("url") or "",
-                              metrics={"domain": article.get("domain") or "", "power": True, "key": _key(title)}))
-    return signals
+    if parent in GERMAN:
+        country = parent if parent != "LI" else "CH"
+        return {"q": f'(Stromausfall OR Blackout OR "ohne Strom") ({names})', "hl": "de", "gl": country, "area": area}
+    if parent in SPANISH:
+        return {"q": f'(apagón OR "sin luz" OR "corte de energía") ({names})', "hl": "es-419", "gl": "US",
+                "ceid": "US:es-419", "area": area}
+    return {"q": f'("power outage" OR blackout OR "power cut" OR "without power") ({names})',
+            "hl": "en-US", "gl": "US", "ceid": "US:en", "area": area}
+
+
+def _note(stories: dict, area: str, item: dict) -> None:
+    """Trägt einen Erstbericht in die Lage des Gebiets ein."""
+    when = iso(item["when"])
+    story = stories.setdefault(area, {"first": when, "last": when, "domains": {}, "people": None,
+                                      "nationwide": False, "big": False, "top": item["title"], "active": False})
+    story["first"] = min(story["first"], when)
+    if when >= story["last"]:
+        story["last"], story["top"] = when, item["title"]
+    story["domains"][item["domain"]] = max(story["domains"].get(item["domain"], ""), when)
+    people = count_people(item["title"])
+    if people:
+        story["people"] = max(story["people"] or 0, people)
+    if NATIONWIDE.search(item["title"]):
+        story["nationwide"] = True
+    if BIG_WORDS.search(item["title"]):
+        story["big"] = True
+
+
+def _signal(area: str, story: dict, cfg: dict) -> Signal:
+    count = len(story["domains"])
+    population = areas.population(area)
+    people = story["people"]
+    detail = "1 Medium berichtet" if count == 1 else f"{count} Medien berichten"
+    if story["nationwide"] and population:
+        people = max(people or 0, population // 2)
+        detail += ", landesweiter Ausfall laut Schlagzeilen" if areas.parent(area) == area \
+            else ", flächendeckender Ausfall laut Schlagzeilen"
+    elif people:
+        detail += f", rund {fmt_people(people)} Betroffene laut Schlagzeilen"
+    elif story.get("big") and count >= cfg["big_sources"] and population:
+        people = min(1_000_000, population // 2)  # viele Medien, großer Ausfall, aber keine Zahl
+        detail += ", großer Ausfall laut Schlagzeilen, Zahl unbekannt"
+    else:
+        detail += ", Größe unbekannt"
+    if people and population:
+        people = min(people, population)
+    severity = round(people / population, 4) if people and population else None
+    return Signal(MEDIA, "media_outage", area, observed_at=parse_ts(story["last"]), active=True,
+                  severity=severity, started_at=parse_ts(story["first"]), confirmed_power=True, detail=detail,
+                  metrics={"sources": count, "people": people, "nationwide": story["nationwide"]})
 
 
 def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
-    signals, errors, attempts = [], [], 0
-    for query in cfg.get("priority_queries") or []:
-        attempts += 1
+    stories = cursor.setdefault("stories", {})
+    fixed_queries = cfg.get("priority_queries") or []
+    # Gebiete mit eigener Suche: dort reichen weniger Medien
+    first_hand = {query["area"]: int(query.get("min_sources", cfg["priority_min_sources"]))
+                  for query in fixed_queries if query.get("area")}
+
+    plan = list(fixed_queries)
+    world = cfg.get("world_queries") or []
+    if world:
+        start = cursor.get("rotation", 0) % len(world)
+        plan += [world[(start + step) % len(world)] for step in range(min(cfg["world_per_run"], len(world)))]
+        cursor["rotation"] = (start + cfg["world_per_run"]) % len(world)
+    plan += [confirm_query(area) for area in (context.get("active_areas") or [])[: cfg["max_areas_per_run"]]]
+
+    signals, errors = [], []
+    max_age = timedelta(minutes=cfg["max_age_minutes"])
+    for index, query in enumerate(plan):
+        if index and PAUSE_SECONDS:
+            time.sleep(PAUSE_SECONDS)
         try:
-            signals += google_news(query, cfg, now)
+            items = fetch(query["q"] + " when:1d", query.get("hl", "de"), query.get("gl", "AT"), query.get("ceid"))
         except (HttpError, ET.ParseError) as err:
             errors.append(f"Google News: {err}")
-    todo = (context.get("active_areas") or [])[: cfg["max_areas_per_run"]]
-    for index, area in enumerate(todo):
-        attempts += 1
-        if index:
-            time.sleep(cfg.get("gdelt_pause_seconds", 6))  # GDELT erlaubt eine Anfrage alle 5 Sekunden
-        try:
-            signals += gdelt(cfg, area, now)
-        except HttpError as err:
-            errors.append(f"GDELT {area}: {err}")
-    cursor["note"] = "; ".join(errors)
-    if attempts > len(errors):
-        cursor["data_time"] = iso(now)
-    if attempts and len(errors) == attempts:
-        raise HttpError("; ".join(errors))
+            continue
+        for item in items:
+            title = item["title"]
+            if now - item["when"] > max_age or item["when"] > now + timedelta(minutes=10):
+                continue
+            if not relevant(title):
+                continue
+            named = gazetteer.find(title)
+            fixed = query.get("area")
+            # Nennt die Schlagzeile ein anderes Gebiet als die Suche, gilt die Schlagzeile.
+            targets = [fixed] if fixed and (not named or fixed in named) else named
+            lead = is_lead(title)
+            for area in targets:
+                signals.append(Signal(SOURCE, "news", area, observed_at=item["when"], active=False, detail=title,
+                                      url=item["url"], metrics={"domain": item["domain"], "power": True,
+                                                                "lead": lead}))
+                if lead:
+                    _note(stories, area, item)
+
+    quiet = timedelta(hours=cfg["quiet_hours"])
+    for area, story in list(stories.items()):
+        last = parse_ts(story["last"])
+        if now - last > quiet:
+            if story["active"]:
+                signals.append(Signal(MEDIA, "media_outage", area, observed_at=now, active=False, severity=0.0,
+                                      started_at=parse_ts(story["first"]), ended_at=last,
+                                      detail="keine neuen Medienberichte"))
+            del stories[area]
+            continue
+        needed = first_hand.get(area, cfg["world_min_sources"])
+        if story["active"] or len(story["domains"]) >= needed:
+            story["active"] = True
+            signals.append(_signal(area, story, cfg))
+
+    cursor["note"] = "; ".join(sorted(set(errors)))
+    if plan and len(errors) == len(plan):
+        raise HttpError(cursor["note"])
+    cursor["data_time"] = iso(now)
     return signals

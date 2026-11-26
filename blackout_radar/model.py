@@ -3,12 +3,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 UTC = timezone.utc
 
 
 def now_utc() -> datetime:
     return datetime.now(UTC)
+
+
+def zone(name: str):
+    """Zeitzone nach Namen. Fehlt die Zeitzonen-Datenbank des Systems, gilt UTC."""
+    try:
+        return ZoneInfo(name)
+    except (KeyError, ValueError, OSError):
+        return UTC
 
 
 def parse_ts(value) -> datetime | None:
@@ -52,6 +61,17 @@ def fmt_pct(share: float | None) -> str:
     return f"−{round(share * 100)} %"
 
 
+def fmt_number(value: float) -> str:
+    return f"{value:,.0f}".replace(",", ".")
+
+
+def fmt_people(value: float) -> str:
+    """Betroffenenzahl als grobe Angabe: 2,4 Mio. oder 40.000."""
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}".replace(".", ",") + " Mio."
+    return fmt_number(round(value, -3) if value >= 10_000 else round(value, -2))
+
+
 @dataclass
 class Signal:
     """Eine Beobachtung einer Datenquelle für ein Gebiet.
@@ -63,7 +83,8 @@ class Signal:
       confirmed_outage  von der Quelle selbst als Stromausfall eingestuft
       utility_outage    Störungsmeldung eines Netzbetreibers
       site_down         eigener Sensor meldet Ausfall
-      news              Medienbericht (Bestätigung bzw. Hinweis)
+      media_outage      mehrere Medien berichten über einen Stromausfall (verdichtet je Gebiet)
+      news              einzelner Medienbericht (Beleg und Schlagzeile)
       annotation        Ursachenangabe einer Quelle (z. B. Kabelschaden)
     """
 
@@ -95,6 +116,6 @@ class Message:
         return {"title": self.title, "body": self.body, "level": self.level, "key": self.key, "url": self.url}
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Message":
+    def from_dict(cls, data: dict) -> Message:
         return cls(data.get("title", ""), data.get("body", ""), data.get("level", "info"),
                    data.get("key", ""), data.get("url", ""))

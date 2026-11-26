@@ -1,0 +1,134 @@
+name: Blackout-Radar
+
+# Fragt alle 5 Minuten die Datenquellen ab und verschickt Meldungen.
+# Der Zustand (laufende Ereignisse, Statistik, Lagebericht) liegt im Zweig "state".
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+    - cron: "17 3 * * 1"   # zusätzlich einmal pro Woche: hält den Zeitplan aktiv (siehe letzter Schritt)
+  workflow_dispatch:
+    inputs:
+      aktion:
+        description: "lauf = normaler Lauf, test-push = Testmeldung, planspiel = Blackout-Übung (16 Testmeldungen), diagnose = Datenquellen prüfen"
+        type: choice
+        default: lauf
+        options:
+          - lauf
+          - test-push
+          - planspiel
+          - diagnose
+
+permissions:
+  contents: write   # Zustand in den Zweig "state" schreiben
+  actions: write    # den eigenen Zeitplan aktiv halten
+
+concurrency:
+  # Läufe, die den Zustand verändern, laufen nie gleichzeitig. Handaktionen ohne Zustand warten nicht darauf.
+  group: ${{ (github.event_name == 'workflow_dispatch' && inputs.aktion != 'lauf') && format('blackout-radar-{0}', inputs.aktion) || 'blackout-radar' }}
+  cancel-in-progress: false
+
+jobs:
+  radar:
+    name: Radar
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    env:
+      AKTION: ${{ inputs.aktion || 'lauf' }}
+      STATUS_URL: https://github.com/${{ github.repository }}/blob/state/status.md
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+      NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      MAIL_FROM: ${{ secrets.MAIL_FROM }}
+      MAIL_TO: ${{ secrets.MAIL_TO }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Zustand laden
+        id: laden
+        if: env.AKTION == 'lauf'
+        run: |
+          mkdir -p "$RUNNER_TEMP/zustand"
+          code=0
+          git ls-remote --exit-code --heads origin state > /dev/null || code=$?
+          if [ "$code" -eq 0 ]; then
+            git fetch --quiet --depth=1 origin state
+            git archive FETCH_HEAD | tar -x -C "$RUNNER_TEMP/zustand"
+          elif [ "$code" -eq 2 ]; then
+            echo "Erster Lauf: Es gibt noch keinen gespeicherten Zustand."
+          else
+            # Lieber ein Lauf weniger als den gespeicherten Zustand mit einem leeren überschreiben.
+            echo "::error::Der gespeicherte Zustand ist nicht erreichbar (git ls-remote: $code)."
+            exit 1
+          fi
+
+      - name: Lauf
+        if: env.AKTION == 'lauf'
+        run: python3 -m blackout_radar run --state "$RUNNER_TEMP/zustand/state.json"
+
+      - name: Zustand speichern
+        # Auch nach einem abgebrochenen Lauf, damit der Abbruch nur einmal am Tag gemeldet wird.
+        if: always() && env.AKTION == 'lauf' && steps.laden.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/zustand"
+          if [ -z "$(ls -A)" ]; then
+            echo "Nichts zu speichern."
+            exit 0
+          fi
+          git init --quiet --initial-branch=state
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit --quiet --message "Stand $(date -u +'%Y-%m-%d %H:%M') UTC"
+          # Der Zweig besteht immer nur aus diesem einen Stand, damit das Repository klein bleibt.
+          git push --quiet --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" state
+
+      - name: Lagebericht anzeigen
+        if: always() && env.AKTION == 'lauf'
+        run: |
+          if [ -f "$RUNNER_TEMP/zustand/status.md" ]; then
+            cat "$RUNNER_TEMP/zustand/status.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Testmeldung
+        if: env.AKTION == 'test-push'
+        run: python3 -m blackout_radar test-push
+
+      - name: Planspiel
+        if: env.AKTION == 'planspiel'
+        run: python3 -m blackout_radar simulate --send
+
+      - name: Diagnose
+        if: env.AKTION == 'diagnose'
+        run: python3 -u -m blackout_radar probe
+
+      - name: Zeitplan aktiv halten
+        # GitHub schaltet Zeitpläne ab, wenn in einem Repository 60 Tage lang nichts geschieht.
+        if: github.event.schedule == '17 3 * * 1' || env.AKTION == 'diagnose'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --silent --method PUT "repos/$GITHUB_REPOSITORY/actions/workflows/monitor.yml/enable" \
+            || echo "::warning::Der Zeitplan ließ sich nicht über die Schnittstelle bestätigen."
+          # Zusätzlich ein Vermerk im Hauptzweig, wenn dort seit 45 Tagen nichts geändert wurde.
+          tage=$(( ($(date +%s) - $(git log -1 --format=%ct)) / 86400 ))
+          echo "Letzte Änderung im Hauptzweig vor $tage Tagen."
+          if [ "$tage" -ge 45 ] && [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            date -u +%Y-%m-%d > .github/zeitplan-aktiv
+            git add .github/zeitplan-aktiv
+            git -c user.name="github-actions[bot]" \
+                -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+                commit --quiet --message "Zeitplan aktiv halten"
+            git push --quiet origin "HEAD:$GITHUB_REF"
+          fi

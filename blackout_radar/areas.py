@@ -108,8 +108,9 @@ COUNTRIES: dict[str, tuple[str, str, float]] = {
     "WS": ("Samoa", "Samoa", 0.22), "TO": ("Tonga", "Tonga", 0.1),
 }
 
-# Österreichische Bundesländer nach ISO 3166-2:AT
+# Teilgebiete nach ISO 3166-2: österreichische Bundesländer und die Krim
 REGIONS: dict[str, tuple[str, str, float]] = {
+    "UA-43": ("Krim", "Crimea", 2.4),
     "AT-1": ("Burgenland", "Burgenland", 0.30), "AT-2": ("Kärnten", "Carinthia", 0.57),
     "AT-3": ("Niederösterreich", "Lower Austria", 1.72), "AT-4": ("Oberösterreich", "Upper Austria", 1.53),
     "AT-5": ("Salzburg", "Salzburg", 0.57), "AT-6": ("Steiermark", "Styria", 1.27),

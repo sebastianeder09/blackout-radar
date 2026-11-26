@@ -1,5 +1,8 @@
 name: Prüfung
 
+# Läuft bei jeder Änderung: Tests ohne Netz, danach ein Probelauf gegen die echten Datenquellen.
+# Verschickt wird dabei nichts, es sind keine Zugangsdaten im Spiel.
+
 on:
   pull_request:
   push:
@@ -8,23 +11,43 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: pruefung-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests:
     name: Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - name: Python-Version
-        run: python3 --version
+      - uses: actions/checkout@v5
+      - name: Python-Version und Zeitzone
+        run: |
+          python3 --version
+          python3 -c "from zoneinfo import ZoneInfo; print(ZoneInfo('Europe/Vienna'))"
       - name: Quelltext übersetzen
-        run: python3 -m compileall -q blackout_radar
+        run: python3 -m compileall -q blackout_radar tests
+      - name: Tests
+        run: python3 -m unittest discover -s tests -t .
+      - name: Planspiel
+        run: python3 -m blackout_radar simulate
 
   live:
     name: Datenquellen live
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Diagnose der Datenquellen
-        run: python3 -u -m blackout_radar.probe utility
+        run: python3 -u -m blackout_radar probe
+      - name: Zwei echte Läufe ohne Versand
+        run: |
+          python3 -m blackout_radar run --state "$RUNNER_TEMP/radar/state.json"
+          sleep 30
+          python3 -m blackout_radar run --state "$RUNNER_TEMP/radar/state.json"
+          cat "$RUNNER_TEMP/radar/status.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "----- Lagebericht -----"
+          cat "$RUNNER_TEMP/radar/status.md"
+          echo "----- Zustand -----"
+          python3 -c "import json, sys; s = json.load(open(sys.argv[1])); print(json.dumps({k: s[k] for k in ('sources', 'outbox', 'sent', 'daily') if k in s}, ensure_ascii=False, indent=1)); print('Ereignisse:', len(s.get('events', {})), 'Verlauf:', len(s.get('history', [])))" "$RUNNER_TEMP/radar/state.json"

@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 
 from ..model import iso
-from . import cloudflare, energy_charts, frequency, ioda, news
+from . import cloudflare, energy_charts, frequency, ioda, linznetz, news
 
 log = logging.getLogger("blackout_radar")
 
@@ -13,6 +13,7 @@ COLLECTORS = {
     "load": energy_charts.collect,
     "ioda": ioda.collect,
     "cloudflare": cloudflare.collect,
+    "utility": linznetz.collect,
     "news": news.collect,
 }
 

@@ -1,0 +1,57 @@
+# Einstellungen des Blackout-Radars.
+#
+# Alles hier ist freiwillig: Ohne Änderung gelten die Standardwerte, die unten als
+# Kommentar stehen. Zum Ändern das Zeichen # am Zeilenanfang entfernen und den Wert
+# anpassen. Zugangsdaten (ntfy-Thema, SMTP) gehören NICHT in diese Datei, weil das
+# Repository öffentlich ist. Sie kommen als "Secrets" in die GitHub-Einstellungen.
+
+# timezone = "Europe/Vienna"
+
+[filter]
+# min_duration_minutes = 30       # Rest der Welt: erst melden, wenn der Ausfall so lange dauert
+# min_affected_people = 500000    # und grob so viele Menschen betrifft
+# require_power_confirmation = true   # und Strom als Ursache belegt ist
+# update_interval_minutes = 120   # Zwischenstand bei laufenden Ereignissen
+# end_confirm_minutes = 15        # so lange muss es ruhig sein, bevor die Entwarnung kommt
+# max_notices_per_hour = 4        # höchstens so viele Meldungen je Ereignis und Stunde
+# ignore_areas = []               # Gebiete, die nie gemeldet werden, z. B. ["UA", "ZA"]
+
+[priority]
+# areas = ["AT-4", "AT"]          # Vorrang: Oberösterreich und Österreich
+# always_areas = ["AT-4"]         # hier wird jeder Ausfall sofort gemeldet, auch ein kleiner
+# min_severity = 0.15             # übrige Vorrang-Gebiete: sofort ab diesem betroffenen Anteil (15 %)
+# update_interval_minutes = 60    # Zwischenstand bei einem großen Ausfall im Vorrang-Gebiet
+
+[daily_summary]
+# enabled = true                  # tägliche Übersicht als leise Meldung, zugleich Lebenszeichen
+# time = "07:00"
+
+[health]
+# alert_after_hours = 3           # Meldung, wenn eine Datenquelle so lange ausfällt
+# gap_minutes = 90                # Meldung, wenn so lange kein Lauf stattgefunden hat
+
+[notify.ntfy]
+# server = "https://ntfy.sh"
+# skip_levels = []                # z. B. ["daily"], um die tägliche Übersicht abzuschalten
+
+[notify.email]
+# skip_levels = ["daily"]         # per E-Mail kommt die tägliche Übersicht standardmäßig nicht
+
+[sources.frequency]
+# alarm_mhz = 200                 # Alarm ab dieser Abweichung von 50 Hz
+# clear_mhz = 100
+
+[sources.load]
+# countries = ["at", "de", "cz", "sk", "hu", "si", "it", "ch", "fr", "es", "pt", "pl"]
+# drop_threshold = 0.20           # Einbruch gegenüber dem Vortag, ab dem die Stromlast als auffällig gilt
+
+[sources.utility]
+# enabled = true                  # Störmeldungen der LINZ NETZ (zählt für Oberösterreich)
+
+[sources.news]
+# max_age_minutes = 180           # ältere Berichte lösen nichts mehr aus
+# world_min_sources = 3           # so viele verschiedene Medien müssen über einen Ausfall berichten
+# quiet_hours = 6                 # so lange ohne neuen Bericht, dann gilt die Lage als beendet
+
+[sources.ioda]
+# enabled = false                 # weltweite Internet-Ausfälle. Noch nicht gegen echte Daten geprüft.

@@ -1,6 +1,8 @@
 """Planspiel: ein Blackout in Österreich im Zeitraffer.
 
-Zeigt, welche Meldungen in welcher Reihenfolge kämen. Es werden keine Datenquellen
+Zeigt, welche Meldungen in welcher Reihenfolge kämen, mit den Quellen, die im
+Normalbetrieb eingeschaltet sind: Netzfrequenz (sofort), Medien (nach rund 20 Minuten)
+und Stromlast (mit gut zwei Stunden Verzögerung). Es werden keine Datenquellen
 abgefragt, alle Signale sind erfunden. Der Kern (Filter, Verlauf, Entwarnung) ist
 derselbe wie im echten Betrieb.
 """
@@ -11,26 +13,26 @@ from datetime import timedelta
 from .engine import Engine
 from .model import Message, Signal, fmt_pct
 
+LOAD_DELAY = timedelta(minutes=135)  # so alt sind Lastdaten, wenn sie eintreffen
+
 # Minute seit Beginn -> Änderungen (Quelle, Gebiet, Wert). Wert None heißt "wieder normal".
+# Medien: (Anteil der Betroffenen oder None, Text). Stromlast: Einbruch als Anteil.
 STEPS = [
     (0, [("frequency", "EU-CE", 49.31)]),
-    (5, [("ioda", "AT", 0.78), ("ioda", "AT-4", 0.85)]),
-    (10, [("ioda", "AT", 0.91), ("ioda", "AT-4", 0.93), ("ioda", "CZ", 0.35), ("ioda", "SI", 0.55),
-          ("frequency", "EU-CE", None)]),
-    (20, [("news", "AT", "Großflächiger Stromausfall legt Österreich lahm|orf.at"),
-          ("news", "AT", "Blackout: Ganz Österreich ohne Strom|derstandard.at")]),
-    (60, [("ioda", "HU", 0.30)]),
-    (150, [("load", "AT", 0.86), ("load", "CZ", 0.33)]),
-    (200, [("ioda", "CZ", None)]),
-    (230, [("ioda", "SI", None), ("load", "CZ", None)]),
-    (360, [("ioda", "AT", 0.55), ("ioda", "AT-4", 0.70), ("load", "AT", 0.60)]),
-    (500, [("ioda", "HU", None)]),
-    (540, [("ioda", "AT", 0.20), ("ioda", "AT-4", 0.25), ("load", "AT", 0.35)]),
-    (650, [("ioda", "AT-4", None)]),
-    (705, [("ioda", "AT", None)]),
-    (720, [("load", "AT", None)]),
+    (10, [("frequency", "EU-CE", None)]),
+    (20, [("media", "AT-4", (None, "1 Medium berichtet, Größe unbekannt")),
+          ("news", "AT-4", "Stromausfall in weiten Teilen Oberösterreichs|nachrichten.at")]),
+    (25, [("media", "AT-4", (None, "3 Medien berichten, Größe unbekannt")),
+          ("media", "AT", (0.5, "4 Medien berichten, landesweiter Ausfall laut Schlagzeilen")),
+          ("news", "AT", "Blackout: Ganz Österreich ohne Strom|derstandard.at"),
+          ("news", "AT", "Großflächiger Stromausfall legt Österreich lahm|orf.at")]),
+    (165, [("load", "AT", 0.86), ("load", "CZ", 0.33)]),
+    (240, [("load", "CZ", None)]),
+    (420, [("load", "AT", 0.60)]),
+    (600, [("load", "AT", 0.35)]),
+    (780, [("load", "AT", None)]),
 ]
-END_MINUTE = 760
+END_MINUTE = 830
 EXPECTED_MW = {"AT": 9400, "CZ": 8900}
 
 
@@ -42,14 +44,15 @@ def _signal(source: str, area: str, value, since, now) -> Signal:
     active = value is not None
     if source == "frequency":
         if active:
+            detail = f"Netzfrequenz {value:.3f} Hz statt 50,000 Hz (Alarmgrenze ±200 mHz)".replace(".", ",")
             return Signal("frequency", "frequency", area, observed_at=now, severity=round(abs(value - 50), 3),
                           started_at=since, metrics={"worst_hz": value, "current_hz": value},
-                          detail=f"Netzfrequenz {value:.3f} Hz statt 50,000 Hz (Alarmgrenze ±200 mHz)".replace(".", ","))
+                          detail=detail + ". Stufe laut Notfallplan: Abwurf von Speicherpumpen")
         return Signal("frequency", "frequency", area, observed_at=now, active=False, severity=0.0, started_at=since,
                       ended_at=now, metrics={"worst_hz": 49.31, "current_hz": 49.98},
-                      detail="Netzfrequenz wieder bei 49,980 Hz")
+                      detail="Netzfrequenz wieder bei 49,980 Hz, größte Abweichung war 49,310 Hz")
     if source == "load":
-        data_time = now - timedelta(minutes=135)  # Lastdaten kommen mit gut zwei Stunden Verzögerung
+        data_time = now - LOAD_DELAY
         if active:
             expected = EXPECTED_MW.get(area, 5000)
             detail = f"Stromlast {fmt_pct(value)} ({_mw(expected * (1 - value))} statt {_mw(expected)} MW)"
@@ -57,11 +60,9 @@ def _signal(source: str, area: str, value, since, now) -> Signal:
                           confirmed_power=True, detail=detail)
         return Signal("load", "load_drop", area, observed_at=data_time, active=False, severity=0.0, started_at=since,
                       ended_at=data_time, confirmed_power=True, detail="Stromlast wieder normal")
-    if active:
-        return Signal("ioda", "internet_drop", area, observed_at=now, severity=value, started_at=since,
-                      detail=f"Internet-Erreichbarkeit {fmt_pct(value)}")
-    return Signal("ioda", "internet_drop", area, observed_at=now, active=False, severity=0.0, started_at=since,
-                  ended_at=now, detail="Internet-Erreichbarkeit wieder normal")
+    share, detail = value
+    return Signal("media", "media_outage", area, observed_at=now, severity=share, started_at=since,
+                  confirmed_power=True, detail=detail)
 
 
 def run(cfg: dict, start, step_minutes: int = 5) -> list[tuple]:
@@ -82,9 +83,9 @@ def run(cfg: dict, start, step_minutes: int = 5) -> list[tuple]:
                 _, since = current.pop((source, area), (None, now))
                 signals.append(_signal(source, area, None, since, now))
             else:
-                since = current.get((source, area), (None, now - timedelta(minutes=4)))[1]
+                since = current.get((source, area), (None, now))[1]
                 if source == "load" and (source, area) not in current:
-                    since = start + timedelta(minutes=5)
+                    since = start + timedelta(minutes=5)  # Lastdaten zeigen den wahren Beginn im Nachhinein
                 current[(source, area)] = (value, since)
         signals += [_signal(source, area, value, since, now) for (source, area), (value, since) in current.items()]
         for message in engine.tick(signals, now):
@@ -93,7 +94,8 @@ def run(cfg: dict, start, step_minutes: int = 5) -> list[tuple]:
 
 
 def render(cfg: dict, start, tz) -> str:
-    lines = ["Planspiel: Blackout in Österreich. Alle Signale sind erfunden.", ""]
+    lines = ["Planspiel: Blackout in Österreich. Alle Signale sind erfunden.",
+             "Beginn des gedachten Ausfalls: " + (start + timedelta(minutes=5)).astimezone(tz).strftime("%H:%M Uhr"), ""]
     for when, message in run(cfg, start):
         lines.append(f"── {when.astimezone(tz).strftime('%H:%M')} Uhr  [{message.level}]  {message.title}")
         lines += ["   " + line for line in message.body.splitlines()]

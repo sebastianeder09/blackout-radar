@@ -114,13 +114,15 @@ PROVIDERS = {"energy_charts": from_energy_charts, "netzfrequenzmessung": from_ne
 
 
 def analyse(sample: dict, cfg: dict, cursor: dict) -> list[Signal]:
-    alarm, clear = cfg["alarm_mhz"] / 1000.0, cfg["clear_mhz"] / 1000.0
+    clear = cfg["clear_mhz"] / 1000.0
     low, high = 50.0 - sample["min"], sample["max"] - 50.0
     worst_hz = sample["min"] if low >= high else sample["max"]
     event = cursor.get("event")
+    fresh = False
     if sample["t_breach"] is not None:
         if event is None:
             event = cursor["event"] = {"start": iso(sample["t_breach"]), "worst_hz": worst_hz}
+            fresh = True
         elif abs(worst_hz - 50.0) > abs(event["worst_hz"] - 50.0):
             event["worst_hz"] = worst_hz
     if event is None:
@@ -131,7 +133,10 @@ def analyse(sample: dict, cfg: dict, cursor: dict) -> list[Signal]:
     start = parse_ts(event["start"])
     uneasy = parse_ts(event.get("uneasy")) or start
     metrics = {"worst_hz": worst, "current_hz": sample["f"], "provider": sample.get("provider", "")}
-    if abs(sample["f"] - 50.0) < clear and sample["t"] - uneasy >= timedelta(minutes=cfg["calm_minutes"]):
+    # Ein kurzer Einbruch ist oft schon vorbei, wenn er entdeckt wird. Er wird trotzdem zuerst
+    # als Alarm gemeldet und erst im nächsten Lauf als beendet.
+    calm = abs(sample["f"] - 50.0) < clear and sample["t"] - uneasy >= timedelta(minutes=cfg["calm_minutes"])
+    if calm and not fresh:
         del cursor["event"]
         return [Signal(SOURCE, "frequency", AREA, observed_at=sample["t"], active=False, severity=0.0,
                        started_at=start, ended_at=max(uneasy, start), metrics=metrics,

@@ -18,18 +18,21 @@ DEFAULTS: dict = {
         "end_confirm_minutes": 15,        # so lange muss es ruhig sein, bevor Entwarnung kommt
         "link_window_hours": 3,           # Ausfälle in Nachbarländern in diesem Abstand gelten als ein Ereignis
         "load_alone_min_drop": 0.40,      # Lastdaten ohne zweites Signal zählen nur bei so großem Einbruch
+        "load_alone_min_minutes": 30,     # und nur, wenn er in den Daten mindestens so lange anhält
+        "max_notices_per_hour": 4,        # höchstens so viele Meldungen je Ereignis und Stunde
         "source_stale_minutes": 240,      # Signal ohne Auffrischung verfällt nach dieser Zeit
         "news_confirm_count": 2,          # so viele Medien müssen Stromausfall melden
         "keep_ended_hours": 48,
+        "ignore_areas": [],               # Gebiete, die nie gemeldet werden, z. B. ["UA"]
     },
     "priority": {
         "areas": ["AT-4", "AT"],          # hier sofort melden, ohne 30-Minuten-Regel
-        "min_severity": 0.15,
-        "update_interval_minutes": 30,
-        "max_notices_per_hour": 3,
+        "always_areas": ["AT-4"],         # hier zählt jedes Signal, auch ein kleiner Ausfall
+        "min_severity": 0.15,             # übrige Vorrang-Gebiete: erst ab diesem betroffenen Anteil
+        "update_interval_minutes": 60,    # Zwischenstand bei einem großen Ausfall im Vorrang-Gebiet
     },
     "daily_summary": {"enabled": True, "time": "07:00"},
-    "health": {"alert_after_hours": 6, "gap_minutes": 90},
+    "health": {"alert_after_hours": 3, "gap_minutes": 90},
     "notify": {
         "ntfy": {"enabled": True, "server": "https://ntfy.sh", "topic": "", "token": "", "skip_levels": []},
         "email": {"enabled": False, "host": "", "port": 587, "user": "", "password": "",
@@ -47,13 +50,13 @@ DEFAULTS: dict = {
         "load": {
             "enabled": True,
             "base_url": "https://api.energy-charts.info",
-            "countries": ["at", "de", "cz", "sk", "hu", "si", "it", "ch"],
+            "countries": ["at", "de", "cz", "sk", "hu", "si", "it", "ch", "fr", "es", "pt", "pl"],
             "drop_threshold": 0.20, "recover_threshold": 0.08, "confirm_points": 2,
             "poll_minutes_primary": 15, "poll_minutes": 45, "max_requests_per_run": 2,
             "max_data_age_hours": 6,
         },
         "ioda": {
-            "enabled": True,
+            "enabled": False,  # Abfrage noch nicht gegen echte Daten geprüft (Dienst antwortete nicht)
             "base_url": "https://api.ioda.inetintel.cc.gatech.edu/v2",
             "watch_countries": ["AT"],        # hier wird das Rohsignal direkt gemessen
             "watch_regions": {"AT-4": ["Oberösterreich", "Upper Austria", "Oberosterreich"]},
@@ -62,13 +65,44 @@ DEFAULTS: dict = {
         },
         "cloudflare": {"enabled": False, "token": "",
                        "base_url": "https://api.cloudflare.com/client/v4/radar"},
+        "utility": {  # Störmeldungen der LINZ NETZ (öffentliche Seite), zählt für Oberösterreich
+            "enabled": True,
+            "url": "https://www.linznetz.at/portal/de/home/online_services/aktuelle_stoermeldungen",
+        },
         "news": {
             "enabled": True,
-            "gdelt_url": "https://api.gdeltproject.org/api/v2/doc/doc",
-            "max_areas_per_run": 3, "max_age_minutes": 180,
+            "max_age_minutes": 180,        # ältere Berichte lösen nichts mehr aus
+            "quiet_hours": 6,              # so lange ohne neuen Erstbericht, dann gilt die Lage als beendet
+            "priority_min_sources": 1,     # Gebiet mit eigener Suche: schon ein Medium reicht (je Suche änderbar)
+            "world_min_sources": 3,        # sonst müssen so viele verschiedene Medien berichten
+            "big_sources": 6,              # ab so vielen Medien gilt ein Ausfall ohne Zahlenangabe als groß
+            "world_per_run": 2,            # so viele Welt-Suchen je Lauf (reihum)
+            "max_areas_per_run": 2,        # so viele Nachweis-Suchen je Lauf
             "priority_queries": [
                 {"area": "AT-4", "hl": "de", "gl": "AT",
-                 "q": "Stromausfall (Oberösterreich OR Mühlviertel OR Linz OR Wels OR Steyr OR Freistadt OR Perg)"},
+                 "q": "(Stromausfall OR Stromstörung OR \"ohne Strom\") "
+                      "(Oberösterreich OR Mühlviertel OR Linz OR Wels OR Steyr OR Freistadt OR Perg)"},
+                {"area": "AT", "hl": "de", "gl": "AT", "min_sources": 2,
+                 "q": "(Blackout OR Stromausfall OR \"ohne Strom\") Österreich"},
+            ],
+            "world_queries": [
+                {"hl": "en-US", "gl": "US", "ceid": "US:en",
+                 "q": "\"nationwide blackout\" OR \"massive blackout\" OR \"massive power outage\" OR "
+                      "\"major power outage\" OR \"widespread power outage\" OR \"grid collapse\" OR "
+                      "\"millions without power\""},
+                {"hl": "es-419", "gl": "US", "ceid": "US:es-419",
+                 "q": "\"apagón masivo\" OR \"apagón general\" OR \"apagón nacional\" OR \"gran apagón\" OR "
+                      "\"colapso del sistema eléctrico\""},
+                {"hl": "de", "gl": "DE", "ceid": "DE:de",
+                 "q": "\"großflächiger Stromausfall\" OR \"flächendeckender Stromausfall\" OR "
+                      "\"massiver Stromausfall\" OR \"landesweiter Stromausfall\" OR \"Millionen ohne Strom\""},
+                {"hl": "fr", "gl": "FR", "ceid": "FR:fr",
+                 "q": "\"panne de courant géante\" OR \"panne d'électricité géante\" OR "
+                      "\"coupure de courant massive\" OR \"panne d'électricité massive\""},
+                {"hl": "pt-BR", "gl": "BR", "ceid": "BR:pt-419",
+                 "q": "\"apagão nacional\" OR \"apagão geral\" OR \"grande apagão\" OR \"milhões sem energia\""},
+                {"hl": "it", "gl": "IT", "ceid": "IT:it",
+                 "q": "\"maxi blackout\" OR \"blackout elettrico\" OR \"milioni senza corrente\""},
             ],
         },
     },
@@ -112,7 +146,12 @@ def load(path: str | os.PathLike | None = None, env: dict | None = None) -> dict
         node = cfg
         for key in keys[:-1]:
             node = node[key]
-        node[keys[-1]] = int(value) if var == "SMTP_PORT" else value.strip()
+        value = value.strip()
+        if var == "SMTP_PORT":
+            if not value.isdigit():
+                continue  # Tippfehler: es bleibt beim Standard-Port
+            value = int(value)
+        node[keys[-1]] = value
     # Kanäle schalten sich ein, sobald ihre Zugangsdaten vorhanden sind
     notify = cfg["notify"]
     notify["ntfy"]["enabled"] = bool(notify["ntfy"]["enabled"] and notify["ntfy"]["topic"])

@@ -12,11 +12,11 @@ import ssl
 from datetime import timedelta
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
-from zoneinfo import ZoneInfo
+from urllib.parse import urlsplit
 
 from . import http
 from .http import HttpError
-from .model import Message, iso, parse_ts
+from .model import Message, iso, parse_ts, zone
 
 log = logging.getLogger("blackout_radar")
 
@@ -104,10 +104,30 @@ def send_email(cfg: dict, message: Message) -> None:
 SENDERS = {"ntfy": send_ntfy, "email": send_email}
 
 
+def secrets(cfg: dict) -> list[str]:
+    """Zugangsdaten und Adressen, die in keiner gespeicherten Fehlermeldung stehen dürfen."""
+    ntfy, mail = cfg.get("ntfy") or {}, cfg.get("email") or {}
+    values = [ntfy.get("topic"), ntfy.get("token"), mail.get("host"), mail.get("user"), mail.get("password"),
+              mail.get("sender")]
+    values += str(mail.get("recipient") or "").replace(";", ",").split(",")
+    server = urlsplit(str(ntfy.get("server") or "")).netloc
+    if server and server != "ntfy.sh":
+        values.append(server)
+    found = {str(value).strip() for value in values if value and len(str(value).strip()) >= 3}
+    return sorted(found, key=len, reverse=True)
+
+
+def scrub(text: str, hidden: list[str]) -> str:
+    for value in hidden:
+        text = text.replace(value, "***")
+    return text
+
+
 class Notifier:
     def __init__(self, cfg: dict, state: dict):
         self.cfg = cfg["notify"]
-        self.tz = ZoneInfo(cfg.get("timezone", "Europe/Vienna"))
+        self.tz = zone(cfg.get("timezone", "Europe/Vienna"))
+        self.hidden = secrets(self.cfg)
         self.outbox: list = state.setdefault("outbox", [])
         self.sent: list = state.setdefault("sent", [])
 
@@ -140,8 +160,8 @@ class Notifier:
                 try:
                     SENDERS[channel](self.cfg[channel], message)
                 except DeliveryError as err:
-                    item["errors"][channel] = str(err)[:200]
-                    log.warning("Versand fehlgeschlagen (%s): %s", message.title, err)
+                    item["errors"][channel] = scrub(str(err), self.hidden)[:200]
+                    log.warning("Versand fehlgeschlagen (%s): %s", message.title, item["errors"][channel])
                 else:
                     item["pending"].remove(channel)
                     item["done"].append(channel)
@@ -168,5 +188,5 @@ class Notifier:
                 SENDERS[channel](self.cfg[channel], message)
                 result[channel] = "ok"
             except DeliveryError as err:
-                result[channel] = str(err)
+                result[channel] = scrub(str(err), self.hidden)
         return result

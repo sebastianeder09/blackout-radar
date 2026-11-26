@@ -1,4 +1,4 @@
-"""Lastauswertung an echten Reihen: vier echte Stromausfälle und ruhige Wochen mit Feiertagen.
+"""Lastauswertung an echten Reihen: drei große Stromausfälle in sechs Ländern und ruhige Wochen mit Feiertagen.
 
 Die Reihen in tests/data/lastreihen.json stammen von Energy-Charts (Fraunhofer ISE, Daten von
 ENTSO-E, CC BY 4.0). Sie wurden mit "python -m blackout_radar probe --only replay" abgerufen.
@@ -56,6 +56,31 @@ class QuietWeeks(Replay):
         # Deutschland: drei Wochen im November. Ausgewertet wird jeweils ab dem achten Tag.
         for name in ("at-2026-11", "at-2026-05-01", "at-2026-01-01", "de-2026-11"):
             self.assertEqual(self.course(name), [], name)
+
+
+class SunnySunday(Replay):
+    """Am Sonntag, 26.04.2026 lag die Last in Österreich nachmittags um mehr als ein Viertel unter der des Vorsonntags.
+
+    Das ist das Wetter (Sonne, Photovoltaik) und kein Ausfall. Der Samstag davor verlief ähnlich wie der Sonntag.
+    """
+
+    def test_sunday_afternoon_far_below_the_sunday_before(self):
+        _, points = real("at-2026-05-01")
+        load = dict(points)
+        self.assertLess(load["2026-04-26T14:00:00Z"] / load["2026-04-19T14:00:00Z"], 0.74)
+        self.assertGreater(load["2026-04-26T14:00:00Z"] / load["2026-04-25T14:00:00Z"], 0.90)
+
+    def test_outage_in_the_morning_does_not_drag_on_into_the_afternoon(self):
+        """Gedachter Ausfall von 8 bis 10 Uhr UTC, halbe Last. Die echten Werte danach sind unverändert."""
+        country, points = real("at-2026-05-01")
+        changed = [[stamp, value * 0.5 if "2026-04-26T08:00:00Z" <= stamp < "2026-04-26T10:00:00Z" else value]
+                   for stamp, value in points if stamp < "2026-04-27T12:00:00Z"]
+        found = probe.replay(country, changed, self.cfg)
+        self.assertEqual({iso(signal.started_at) for _, signal in found}, {"2026-04-26T08:00:00Z"})
+        self.assertAlmostEqual(max(signal.severity for _, signal in found), 0.5, delta=0.03)
+        self.assertFalse(found[-1][1].active)
+        self.assertEqual(iso(found[-1][1].ended_at), "2026-04-26T10:00:00Z")
+        self.assertEqual(iso(found[-1][0]), "2026-04-26T10:45:00Z")  # zwei ruhige Werte, die schon zählen
 
 
 class RealOutages(Replay):

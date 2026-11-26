@@ -101,7 +101,7 @@ Alle Schwellen stehen in [`config.toml`](config.toml), jeweils mit Erklärung. O
 | Quelle | Liefert | Verzögerung | Stand der Prüfung |
 |---|---|---|---|
 | Netzfrequenz (Energy-Charts, Ersatz: netzfrequenzmessung.de, laut Anbieter nur für privaten Gebrauch) | Frequenz im Verbundnetz Kontinentaleuropa, sekundengenau | 1 bis 2 Minuten | live geprüft |
-| Stromlast (Energy-Charts, Daten von ENTSO-E) | Verbrauch je Land für Österreich und 9 weitere Länder (DE, CZ, SK, HU, CH, FR, ES, PT, PL) | 2 bis 5 Stunden | live geprüft, Auswertung an 4 echten Stromausfällen nachgespielt |
+| Stromlast (Energy-Charts, Daten von ENTSO-E) | Verbrauch je Land für Österreich und 9 weitere Länder (DE, CZ, SK, HU, CH, FR, ES, PT, PL) | 2 bis 5 Stunden | live geprüft, Auswertung an 3 echten Großausfällen nachgespielt |
 | Medien (Google News) | Schlagzeilen in 6 Sprachen, gezielte Suchen für Oberösterreich und Österreich | je nach Berichterstattung, geschätzt 15 bis 90 Minuten | live geprüft |
 | Störmeldungen LINZ NETZ | öffentliche Störungsseite, zählt für Oberösterreich | wenige Minuten | Seite wird gelesen, eine echte Störung war beim Einrichten nicht aktiv |
 | IODA (Georgia Tech) | Internet-Ausfälle weltweit | | abgeschaltet, der Dienst war beim Einrichten nicht erreichbar |
@@ -109,7 +109,7 @@ Alle Schwellen stehen in [`config.toml`](config.toml), jeweils mit Erklärung. O
 
 ### Gegenprobe mit echten Stromausfällen
 
-Die Auswertung der Stromlast wurde mit den echten Werten vergangener Ausfälle nachgespielt. Die Reihen liegen als Tests im Repository (`tests/data/lastreihen.json`).
+Die Auswertung der Stromlast wurde mit den echten Werten von drei großen Ausfällen nachgespielt (Iberische Halbinsel, Tschechien, Westbalkan). Die Reihen liegen als Tests im Repository (`tests/data/lastreihen.json`).
 
 | Ausfall | Was die Lastwerte zeigen | Ergebnis der Auswertung |
 |---|---|---|
@@ -118,6 +118,17 @@ Die Auswertung der Stromlast wurde mit den echten Werten vergangener Ausfälle n
 | Tschechien, 04.07.2025 | Einbruch um 28 %, vier Stunden | Beginn und Ende richtig |
 | Bosnien und Montenegro, 21.06.2024 | Einbruch um 83 % und 67 %, zwei bis drei Stunden | Beginn und Ende richtig, kein Scheinbefund am Tag danach |
 | 8 ruhige Wochen in Österreich und Deutschland, mit Weihnachten, Neujahr, Dreikönig und 1. Mai | Feiertage und Wochenenden | kein Befund |
+
+In die ruhigen Wochen wurden außerdem 1.200 gedachte Ausfälle eingesetzt: an jedem Tag zu vier Tageszeiten, mit 25, 50 und 95 % weniger Last, 2 und 9 Stunden lang. Als richtig gilt: genau ein Einbruch, Beginn auf eine Stunde und Tiefe auf 8 Prozentpunkte genau, Ende höchstens eineinhalb Stunden zu spät. Nachrechnen: `python3 -m tests.gegenprobe` (dauert einige Minuten).
+
+| Ruhige Wochen | Fälle | Richtig | Ungenau |
+|---|---|---|---|
+| Österreich, November 2026 | 312 | 312 | |
+| Deutschland, November 2026 | 312 | 312 | |
+| Österreich, um den 1. Mai 2026 | 216 | 205 | 11, alle am Feiertag oder am Abend davor |
+| Österreich, Weihnachten 2025 bis Dreikönig 2026 | 360 | 348 | 12, alle mit 25 % weniger Last rund um die Feiertage |
+
+An gewöhnlichen Tagen stimmen Beginn, Tiefe und Ende. Ungenau wird es rund um Feiertage, siehe Grenzen.
 
 Italien und Slowenien werden nicht überwacht: Ihre Lastwerte waren bei der Prüfung lückenhaft (einzelne Viertelstunden und die neuesten Werte nur zum Teil gemeldet).
 
@@ -129,6 +140,7 @@ Italien und Slowenien werden nicht überwacht: Ihre Lastwerte waren bei der Prü
 - **Lastdaten kommen 2 bis 5 Stunden verzögert**, je nach Land. Die Zeiten in den Meldungen stimmen, aber Wiederherstellung und Entwarnung erfährt man entsprechend später. Im Ernstfall sind Radio (ORF) und Behörden schneller.
 - **Lastdaten können bei einem großen Ausfall ganz ausbleiben.** In Spanien meldete der Netzbetreiber am 28.04.2025 ab Beginn des Ausfalls eineinhalb Tage lang keine Werte. Dann gibt es von dieser Quelle weder Bestätigung noch Entwarnung, die Meldungen stützen sich auf Netzfrequenz und Medien. Der Lagebericht zeigt in so einem Fall "keine neuen Werte seit ..." statt eines alten, normal aussehenden Werts. Ausbleibende Werte allein sind kein Beleg für einen Ausfall.
 - **Kleine und kurze Einbrüche** sieht die Stromlast nicht: Ein Befund braucht mindestens 20 % weniger Last als an vergleichbaren Tagen, über mindestens zwei Werte. Als beendet gilt ein Einbruch, wenn die Last wieder bis auf 10 % am üblichen Wert liegt.
+- **Feiertage kennt das Programm nicht.** Ein Feiertag allein löst keinen Befund aus (geprüft an Weihnachten, Neujahr, Dreikönig und 1. Mai). Fällt ein Ausfall aber auf einen Feiertag oder einen Tag direkt davor oder danach, sind Tiefe und Ende aus den Lastdaten ungenau: Die Entwarnung kann einen halben Tag zu spät kommen, und ein Einbruch um ein Viertel kann unerkannt bleiben.
 - **Verlauf innerhalb Österreichs:** Gemessen wird je Land. Welches Bundesland zuerst wieder Strom hat, lässt sich aus offenen Daten nicht ablesen. Für Oberösterreich gibt es nur Medienberichte und die Störmeldungen der LINZ NETZ (Linz und Umgebung).
 - **Wann das Netz wieder läuft**, kann niemand vorhersagen. Die Meldung nennt bei einem Blackout in Österreich den Richtwert der APG aus Simulationen (2021): im besten Fall etwa 10 Stunden, längstens 20 bis 30 Stunden ([ORF](https://orf.at/stories/3230171/)). Eine Studie für das Parlament (2022) nennt 10 bis 24 Stunden bis zu einem voll versorgten Übertragungsnetz ([Trending Topics](https://www.trendingtopics.eu/blackout-oesterreich-studie/)).
 - **GitHub** startet geplante Läufe nicht pünktlich. Verzögerungen von 5 bis 20 Minuten sind normal, einzelne Läufe fallen aus. Nach einer Lücke von 90 Minuten kommt eine Meldung.
@@ -161,6 +173,7 @@ Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anze
 | `blackout_radar/report.py` | Lagebericht, Statistik, tägliche Übersicht |
 | `blackout_radar/simulate.py` | Planspiel |
 | `tests/` | Tests, laufen ohne Netz: `python3 -m unittest discover -s tests -t .` |
+| `tests/gegenprobe.py` | Gegenprobe der Lastauswertung mit gedachten Ausfällen in echten Reihen: `python3 -m tests.gegenprobe` |
 | `.github/workflows/monitor.yml` | Lauf alle 5 Minuten, Zustand im Zweig `state` |
 | `.github/workflows/ci.yml` | Tests und Probelauf gegen die echten Datenquellen bei jeder Änderung |
 

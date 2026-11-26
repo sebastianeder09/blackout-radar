@@ -194,6 +194,58 @@ class LoadAnalysis(unittest.TestCase):
         series = load_series(at(-600), dropped=4, drop=0.5)
         self.assertEqual(energy_charts.analyse("at", series, self.events, self.cfg, at(0)), [])
 
+    def test_unknown_level_needs_a_deeper_drop(self):
+        """Feiertag, und die Stunden davor gehören zu einem eben beendeten Einbruch: Das Niveau ist unbekannt.
+
+        Ein Viertel weniger als an den Vergleichstagen ist dann kein Befund (das erklärt der Feiertag),
+        die Hälfte weniger schon.
+        """
+        series = load_series(self.newest, points=880)
+        for point in series[-40:]:  # heute durchgehend ein Viertel unter den Vergleichstagen
+            point[1] = round(point[1] * 0.75, 1)
+        past = {"at": [[series[-30][0], series[-4][0]]]}
+        self.assertEqual(energy_charts.analyse("at", series, self.events, self.cfg, at(0), past), [])
+        self.assertEqual(self.events, {})
+        for point in series[-4:]:
+            point[1] = round(point[1] * 0.6, 1)
+        signal = energy_charts.analyse("at", series, self.events, self.cfg, at(0), past)[0]
+        self.assertTrue(signal.active)
+        self.assertAlmostEqual(signal.severity, 0.55, places=2)
+
+    def test_new_outage_starts_after_the_end_of_the_previous_one(self):
+        series = load_series(self.newest, dropped=14, drop=0.5)
+        past = {"at": [[series[-14][0], series[-6][0]]]}  # die ersten zwei Stunden davon sind schon abgeschlossen
+        signal = energy_charts.analyse("at", series, self.events, self.cfg, at(0), past)[0]
+        self.assertEqual(iso(signal.started_at), series[-6][0])
+
+    def test_sunday_is_compared_with_saturday(self):
+        """Sonniger Sonntag nach einem trüben: Mittags liegt die Last weit unter der des Vorsonntags.
+
+        Gegenüber dem Samstag fehlt nichts. Ein Einbruch vom Morgen gilt deshalb mittags als beendet
+        und zieht sich nicht bis zum Abend.
+        """
+        sunday = at(3 * 1440).replace(hour=0)  # Sonntag, 29.11.2026
+        newest = sunday + timedelta(hours=7, minutes=30)
+        self.assertEqual(energy_charts.day_type(newest), 2)
+
+        def series(until):
+            rows = load_series(until, points=880)
+            for point in rows:
+                when = parse_ts(point[0])
+                if when.date() == (sunday - timedelta(days=7)).date() and 9 <= when.hour < 17:
+                    point[1] = round(point[1] * 1.35, 1)  # trüber Vorsonntag: mittags deutlich mehr Last
+                if sunday + timedelta(hours=6) <= when < sunday + timedelta(hours=8):
+                    point[1] = round(point[1] * 0.5, 1)   # Einbruch heute von 6 bis 8 Uhr UTC
+            return rows
+
+        signal = energy_charts.analyse("at", series(newest), self.events, self.cfg, newest + timedelta(hours=2))[0]
+        self.assertTrue(signal.active)
+        self.assertEqual(signal.started_at, sunday + timedelta(hours=6))
+        noon = sunday + timedelta(hours=12)
+        signal = energy_charts.analyse("at", series(noon), self.events, self.cfg, noon + timedelta(hours=2))[0]
+        self.assertFalse(signal.active)
+        self.assertEqual(signal.ended_at, sunday + timedelta(hours=8))
+
 
 class LoadCollector(unittest.TestCase):
     def setUp(self):

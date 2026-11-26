@@ -54,6 +54,7 @@ DEFAULTS: dict = {
             # (einzelne Viertelstunden und die neuesten Werte nur zum Teil gemeldet).
             "countries": ["at", "de", "cz", "sk", "hu", "ch", "fr", "es", "pt", "pl"],
             "drop_threshold": 0.20, "recover_threshold": 0.10, "confirm_points": 2,
+            "drop_threshold_blind": 0.40,  # Schwelle, wenn das Niveau des Tages unbekannt ist (nach einer Datenlücke)
             "settle_minutes": 30,          # so alt muss ein Wert sein, bevor er zählt (neueste Werte sind vorläufig)
             "silent_after_minutes": 120,   # so lange über das Übliche hinaus ohne neuen Wert: "keine neuen Werte"
             "poll_minutes_primary": 15, "poll_minutes": 45, "max_requests_per_run": 2,

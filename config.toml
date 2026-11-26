@@ -46,6 +46,7 @@
 #                                 # ohne Italien und Slowenien: deren Werte waren bei der Prüfung lückenhaft
 # drop_threshold = 0.20           # Einbruch gegenüber vergleichbaren Tagen, ab dem die Stromlast als auffällig gilt
 # recover_threshold = 0.10        # näher als so am üblichen Wert gilt der Einbruch als beendet
+# drop_threshold_blind = 0.40     # Schwelle, wenn das Niveau des Tages unbekannt ist (nach einer Datenlücke)
 
 [sources.utility]
 # enabled = true                  # Störmeldungen der LINZ NETZ (zählt für Oberösterreich)

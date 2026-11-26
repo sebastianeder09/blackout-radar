@@ -206,8 +206,6 @@ def probe_news(cfg: dict, now) -> None:
 
 # ----------------------------------------------------------- Netzbetreiber OÖ
 UTILITY_PAGES = (
-    "https://status.netzooe.at/",
-    "https://status.netzooe.at/netzweb/SpannungsloseStationen.html",
     "https://www.linznetz.at/portal/de/home/online_services/aktuelle_stoermeldungen",
 )
 
@@ -248,10 +246,12 @@ def probe_utility(cfg: dict, now) -> None:
             break
         body = re.sub(r"<script.*?</script>|<style.*?</style>", " ", text, flags=re.S | re.I)
         body = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body)).strip()
-        index = body.find("Zum Seitenanfang")
-        print("  Seitentext nach dem Menü:", body[2600:6500])
-        for hit in list(re.finditer("aktuelle_stoermeldungen", text))[:12]:
-            print("  Umfeld:", re.sub(r"\s+", " ", text[max(0, hit.start() - 200): hit.start() + 400]))
+        print("  Seitentext nach dem Menü:", body[2600:7000])
+        main = re.search(r"<main.*?</main>", text, re.S | re.I)
+        if main:
+            print("  Hauptteil (roh):", re.sub(r"\s+", " ", main.group(0))[:6000])
+        for hit in list(re.finditer(r"aktuelle_stoermeldungen\.(?:jsf|xhtml)", text))[:4]:
+            print("  Umfeld:", re.sub(r"\s+", " ", text[max(0, hit.start() - 600): hit.start() + 900]))
         for marker in ("stoermeldung", "Störung", "ui-datatable", "<table"):
             hits = [m.start() for m in re.finditer(marker, text)]
             print(f"  '{marker}': {len(hits)} Treffer")

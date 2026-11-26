@@ -27,4 +27,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Diagnose der Datenquellen
-        run: python3 -m blackout_radar.probe
+        run: python3 -u -m blackout_radar.probe ioda,news,utility

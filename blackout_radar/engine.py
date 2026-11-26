@@ -273,7 +273,7 @@ class Engine:
         del inc["timeline"][:-30]
 
     # ------------------------------------------------------------ Entscheiden
-    def _impact(self, event) -> float:
+    def impact(self, event) -> float:
         """Grobe Zahl betroffener Menschen: Spitzen-Anteil mal Einwohner."""
         incidents = event["incidents"]
         countries = {a for a in incidents if areas.parent(a) == a}
@@ -284,7 +284,7 @@ class Engine:
             total += (inc.get("peak") or 0.0) * areas.population(area)
         return total
 
-    def _is_priority(self, event) -> bool:
+    def is_priority(self, event) -> bool:
         for area, inc in event["incidents"].items():
             if area in self.p["areas"]:
                 peak = inc.get("peak")
@@ -292,17 +292,37 @@ class Engine:
                     return True
         return False
 
-    def _should_report(self, event, duration, priority) -> bool:
-        if event["kind"] == "frequency" or priority:
-            return True
+    def _load_only(self, event) -> bool:
+        """Wahr, wenn nur die (verzögerten) Lastdaten anschlagen und kein zweites Signal.
+
+        Lastdaten allein sind anfällig für Feiertage und unvollständige Meldungen und
+        reichen deshalb nur bei einem massiven Einbruch in einem Vorrang-Gebiet.
+        """
         incidents = event["incidents"].values()
-        if duration < timedelta(minutes=self.f["min_duration_minutes"]):
+        if any(set(i["sources"]) - {"load"} or "Medien" in i["confirmed_by"] for i in incidents):
             return False
-        if self._impact(event) < self.f["min_affected_people"]:
-            return False
+        peak = max((i.get("peak") or 0.0) for i in incidents)
+        return not (self.is_priority(event) and peak >= self.f["load_alone_min_drop"])
+
+    def hold_reasons(self, event, now) -> list[str]:
+        """Gründe, warum ein Ereignis (noch) nicht gemeldet wird. Leer heißt: melden."""
+        if event["kind"] == "frequency":
+            return []
+        if self._load_only(event):
+            return ["nur Lastdaten, kein zweites Signal"]
+        if self.is_priority(event):
+            return []
+        reasons = []
+        incidents = event["incidents"].values()
+        duration = (parse_ts(event["ended_at"]) or now) - parse_ts(event["started_at"])
+        minimum = self.f["min_duration_minutes"]
+        if duration < timedelta(minutes=minimum):
+            reasons.append(f"Dauer erst {fmt_duration(duration)}, Meldung ab {minimum} min")
+        if self.impact(event) < self.f["min_affected_people"]:
+            reasons.append("zu klein für eine Meldung")
         if self.f["require_power_confirmation"] and not any(i["confirmed_power"] for i in incidents):
-            return False
-        return True
+            reasons.append("Strom als Ursache nicht bestätigt")
+        return reasons
 
     def _update_reason(self, event, now, priority):
         incidents = event["incidents"]
@@ -332,9 +352,9 @@ class Engine:
         start = parse_ts(event["started_at"])
         end = parse_ts(event["ended_at"])
         active = end is None
-        priority = self._is_priority(event)
+        priority = self.is_priority(event)
         if not event["reported_at"]:
-            if not self._should_report(event, (end or now) - start, priority):
+            if self.hold_reasons(event, now):
                 return None
             event["reported_at"] = iso(now)
             phase = "start" if active else "retro"
@@ -363,35 +383,60 @@ class Engine:
         return message
 
     # ------------------------------------------------------------ Formulieren
-    def _t(self, when: datetime, now: datetime) -> str:
+    def clock(self, when: datetime, now: datetime) -> str:
         local, ref = when.astimezone(self.tz), now.astimezone(self.tz)
         return local.strftime("%H:%M") if local.date() == ref.date() else local.strftime("%d.%m. %H:%M")
 
     @staticmethod
-    def _names(area_list) -> str:
+    def names(area_list) -> str:
         names = [areas.name(a) for a in area_list]
         return ", ".join(names[:3]) + (f" und {len(names) - 3} weitere" if len(names) > 3 else "")
 
     def classify(self, event) -> str:
         peak = max((i.get("peak") or 0.0) for i in event["incidents"].values())
-        impact = self._impact(event)
+        impact = self.impact(event)
         if peak >= 0.5 and impact >= self.f["min_affected_people"]:
             return "Blackout"
         if impact >= 5 * self.f["min_affected_people"]:
             return "Großer Stromausfall"
         return "Stromausfall"
 
+    def headline(self, event) -> str:
+        order = sorted(event["incidents"].values(), key=lambda i: i["started_at"])
+        if event["kind"] == "frequency":
+            return "Netzfrequenz-Alarm"
+        names = self.names([i["area"] for i in order])
+        if any(i["confirmed_power"] for i in order):
+            return f"{self.classify(event)}: {names}"
+        return f"Verdacht auf Stromausfall: {names}"
+
+    def course_lines(self, event, now) -> list[str]:
+        """Verlauf der Ausbreitung, Reihenfolge der Wiederversorgung und Beleglage."""
+        order = sorted(event["incidents"].values(), key=lambda i: i["started_at"])
+        lines = []
+        if len(order) > 1:
+            lines.append("Verlauf: " + " → ".join(
+                f"{self.clock(parse_ts(i['started_at']), now)} {areas.name(i['area'])}" for i in order))
+        restored = sorted((i for i in order if i["ended_at"]), key=lambda i: i["ended_at"])
+        if restored and len(order) > 1:
+            head = "Reihenfolge der Wiederversorgung: " if event["ended_at"] else "Zuerst wieder versorgt: "
+            lines.append(head + " → ".join(
+                f"{areas.name(i['area'])} {self.clock(parse_ts(i['ended_at']), now)}" for i in restored))
+        if event["kind"] == "outage":
+            lines.append(self.confirmation_line(order))
+        return lines
+
     def area_line(self, inc, now) -> str:
         label = areas.name(inc["area"])
         if inc["ended_at"]:
             start, end = parse_ts(inc["started_at"]), parse_ts(inc["ended_at"])
             peak = f", Spitze {fmt_pct(inc['peak'])}" if inc.get("peak") else ""
-            return f"{label}: wieder versorgt seit {self._t(end, now)} (nach {fmt_duration(end - start)}{peak})"
+            return f"{label}: wieder versorgt seit {self.clock(end, now)} (nach {fmt_duration(end - start)}{peak})"
         parts = []
         for source, entry in inc["sources"].items():
             name = SOURCE_LABELS.get(source, source)
             observed = parse_ts(entry.get("observed_at"))
-            stand = f", Stand {self._t(observed, now)}" if observed and now - observed > timedelta(minutes=20) else ""
+            stand = f", Stand {self.clock(observed, now)}" if observed and now - observed > timedelta(minutes=20) else ""
             if entry.get("active"):
                 if entry.get("detail"):
                     parts.append(entry["detail"] + stand)
@@ -400,7 +445,7 @@ class Engine:
                 else:
                     parts.append(f"{name} gestört{stand}")
             elif entry.get("ended_at") and not entry.get("stale"):
-                parts.append(f"{name} wieder normal seit {self._t(parse_ts(entry['ended_at']), now)}")
+                parts.append(f"{name} wieder normal seit {self.clock(parse_ts(entry['ended_at']), now)}")
         text = f"{label}: " + "; ".join(parts)
         if inc["restoring_since"]:
             text += " (Wiederherstellung läuft)"
@@ -430,11 +475,10 @@ class Engine:
         duration = fmt_duration((end or now) - start)
         if event["kind"] == "frequency":
             return self._compose_frequency(order[0], phase, duration, key, url)
-        names = self._names([i["area"] for i in order])
-        confirmed = any(i["confirmed_power"] for i in order)
+        names = self.names([i["area"] for i in order])
         kind = self.classify(event)
         if phase == "start":
-            title = f"{kind}: {names}" if confirmed else f"Verdacht auf Stromausfall: {names}"
+            title = self.headline(event)
             level = "alarm" if priority else "warn"
         elif phase == "retro":
             title = f"{kind} nachträglich erkannt: {names} (Dauer {duration})"
@@ -448,19 +492,11 @@ class Engine:
             level = "warn" if priority and phase in ("spread", "relapse") else "info"
         lines = []
         if end:
-            lines.append(f"Beginn {self._t(start, now)}, Ende {self._t(end, now)}, Dauer {duration}")
+            lines.append(f"Beginn {self.clock(start, now)}, Ende {self.clock(end, now)}, Dauer {duration}")
         else:
-            lines.append(f"Seit {self._t(start, now)} Uhr, Dauer bisher {duration}")
+            lines.append(f"Seit {self.clock(start, now)} Uhr, Dauer bisher {duration}")
         lines += ["• " + self.area_line(inc, now) for inc in order]
-        if len(order) > 1:
-            lines.append("Verlauf: " + " → ".join(
-                f"{self._t(parse_ts(i['started_at']), now)} {areas.name(i['area'])}" for i in order))
-        restored = sorted((i for i in order if i["ended_at"]), key=lambda i: i["ended_at"])
-        if restored and len(order) > 1:
-            head = "Reihenfolge der Wiederversorgung: " if end else "Zuerst wieder versorgt: "
-            lines.append(head + " → ".join(
-                f"{areas.name(i['area'])} {self._t(parse_ts(i['ended_at']), now)}" for i in restored))
-        lines.append(self.confirmation_line(order))
+        lines += self.course_lines(event, now)
         shown = set()
         for inc in order:
             for item in inc["news"]:
@@ -541,6 +577,7 @@ class Engine:
                 "peak": max((i.get("peak") or 0.0) for i in incidents.values()),
                 "class": self.classify(event) if event["kind"] == "outage" else "Netzfrequenz",
                 "confirmed": any(i["confirmed_power"] for i in incidents.values()),
+                "impact": round(self.impact(event)),
             })
             del self.state["events"][event_id]
         cutoff = iso(now - timedelta(days=90))

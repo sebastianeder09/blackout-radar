@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import traceback
 import xml.etree.ElementTree as ET
 from datetime import timedelta
@@ -114,12 +115,17 @@ def probe_ioda(cfg: dict, now) -> None:
     base = cfg["sources"]["ioda"]["base_url"].rstrip("/")
     until = int(now.timestamp())
 
-    def call(path: str, params: dict):
-        doc = _json(_fetch(f"{base}{path}", params))
+    def call(path: str, params: dict, timeout: float = 30):
+        started = time.monotonic()
+        doc = _json(_fetch(f"{base}{path}", params, timeout=timeout))
+        print(f"  Dauer {time.monotonic() - started:.1f} s")
         if doc is not None:
             print("  Aufbau:", outline(doc))
         return doc
 
+    if call("/entities/query", {"entityType": "country", "entityCode": "AT"}, timeout=90) is None:
+        print("  IODA antwortet nicht, weitere Abfragen übersprungen")
+        return
     doc = call("/outages/alerts", {"from": until - 12 * 3600, "until": until, "entityType": "country", "limit": 5})
     rows = _flatten(doc.get("data") if isinstance(doc, dict) else doc)
     for row in rows[:3]:
@@ -169,19 +175,29 @@ def probe_news(cfg: dict, now) -> None:
             continue
         items = list(root.iter("item"))
         print(f"  {len(items)} Einträge")
-        for item in items[:8]:
-            source = item.find("source")
-            print("   ", {"title": item.findtext("title"), "pubDate": item.findtext("pubDate"),
-                          "source": None if source is None else source.text,
-                          "source_url": None if source is None else source.get("url"),
-                          "link": (item.findtext("link") or "")[:80]})
-    doc = _json(_fetch(section["gdelt_url"], {
-        "query": '(blackout OR "power outage" OR Stromausfall) (Austria OR Österreich)', "mode": "artlist",
-        "format": "json", "timespan": "2880min", "maxrecords": 5, "sort": "datedesc"}))
-    if doc is not None:
-        print("  Aufbau:", outline(doc))
-        for article in (doc.get("articles") or [])[:3] if isinstance(doc, dict) else []:
-            print("   ", article)
+        for item in items:
+            print(f"    {item.findtext('pubDate')} | {item.findtext('title')}")
+    text = _fetch("https://news.google.com/rss/search", {
+        "q": '("power outage" OR blackout OR "power cut" OR "without power") Cuba when:7d',
+        "hl": "en-US", "gl": "US", "ceid": "US:en"})
+    if text is not None:
+        try:
+            items = list(ET.fromstring(text).iter("item"))
+            print(f"  {len(items)} Einträge")
+            for item in items[:12]:
+                print(f"    {item.findtext('pubDate')} | {item.findtext('title')}")
+        except ET.ParseError as err:
+            print(f"  kein XML ({err}): {text[:300]!r}")
+    for attempt in (1, 2):
+        doc = _json(_fetch(section["gdelt_url"], {
+            "query": '(blackout OR "power outage" OR Stromausfall) (Austria OR Österreich)', "mode": "artlist",
+            "format": "json", "timespan": "2880min", "maxrecords": 5, "sort": "datedesc"}))
+        if doc is not None:
+            print("  Aufbau:", outline(doc))
+            for article in (doc.get("articles") or [])[:3] if isinstance(doc, dict) else []:
+                print("   ", article)
+            break
+        time.sleep(8)
 
 
 # ----------------------------------------------------------- Netzbetreiber OÖ
@@ -192,25 +208,48 @@ UTILITY_PAGES = (
 )
 
 
+STATIC = (".css", ".png", ".jpg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".map")
+
+
+def _paths(text: str) -> list[str]:
+    """Adressen und Pfade, die in einem Skript oder einer Seite vorkommen."""
+    found = set(re.findall(r"""["'`]((?:https?:)?/{1,2}[A-Za-z0-9_\-./?=&%{}$:]{3,200})["'`]""", text))
+    return sorted(item for item in found if not item.lower().split("?")[0].endswith(STATIC))
+
+
 def probe_utility(cfg: dict, now) -> None:
     for url in UTILITY_PAGES:
         text = _fetch(url)
         if text is None:
             continue
-        title = re.search(r"<title[^>]*>(.*?)</title>", text, re.S | re.I)
-        print("  Titel:", title.group(1).strip()[:120] if title else "?")
-        refs = sorted(set(re.findall(r"""(?:src|href|action)\s*=\s*["']([^"'#]+)["']""", text)))
-        print(f"  {len(refs)} Verweise:")
-        for ref in refs[:70]:
-            print("     ", ref[:200])
-        hints = sorted(set(re.findall(
-            r"""["']([^"'\s<>]{0,160}(?:api|json|rest|service|servlet|ajax|\.do)[^"'\s<>]{0,160})["']""", text, re.I)))
-        print(f"  {len(hints)} Hinweise auf Datenadressen:")
-        for hint in hints[:50]:
-            print("     ", hint[:240])
+        if len(text) < 6000:
+            print("  Rohtext:", text)
+            host = "/".join(url.split("/")[:3])
+            scripts = sorted(set(re.findall(r"""([A-Za-z0-9_\-./]+\.js)\b""", text)))
+            print("  Skripte:", scripts)
+            for script in scripts[:6]:
+                target = script if script.startswith("http") else host + "/" + script.lstrip("./")
+                if not target.startswith(host):
+                    print("  übersprungen (anderer Server):", target)
+                    continue
+                code = _fetch(target)
+                if code is None:
+                    continue
+                paths = _paths(code)
+                print(f"  {len(paths)} Adressen im Skript:")
+                for item in paths[:120]:
+                    print("     ", item[:200])
+            continue
         body = re.sub(r"<script.*?</script>|<style.*?</style>", " ", text, flags=re.S | re.I)
         body = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body)).strip()
-        print("  Sichtbarer Text:", body[:1200])
+        index = body.rfind("Aktuelle Störmeldungen")
+        print("  Inhalt ab der letzten Überschrift:", body[max(0, index - 100): index + 3000])
+        for marker in ("stoermeldung", "Störung", "ui-datatable", "<table"):
+            hits = [m.start() for m in re.finditer(marker, text)]
+            print(f"  '{marker}': {len(hits)} Treffer")
+        table = re.search(r"<table.*?</table>", text, re.S | re.I)
+        if table:
+            print("  erste Tabelle:", re.sub(r"\s+", " ", table.group(0))[:2500])
 
 
 # --------------------------------------------------------------------- ntfy

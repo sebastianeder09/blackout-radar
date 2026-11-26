@@ -1,0 +1,21 @@
+name: Prüfung
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python-Version
+        run: python3 --version
+      - name: Quelltext übersetzen
+        run: python3 -m compileall -q blackout_radar

@@ -33,7 +33,7 @@ BACKGROUND = """## Einordnung
 - **Brownout**: Spannung oder Versorgung wird abgesenkt oder Verbraucher werden gezielt abgeschaltet (Lastabwurf), um einen Blackout zu verhindern.
 - **Netzfrequenz**: Soll 50,00 Hz. Ab 49,8 Hz werden Reserven aktiviert, ab 49,0 Hz schaltet das Netz automatisch Verbraucher ab, bei 47,5 Hz trennen sich Kraftwerke vom Netz.
 - **Netzwiederaufbau Österreich**: Schwarzstartfähige Kraftwerke (vor allem Speicherkraftwerke) bauen Netzinseln auf, die Schritt für Schritt zusammengeschaltet werden. Richtwerte: Die APG nannte 2021 aus ihren Simulationen im besten Fall etwa 10 Stunden und längstens 20 bis 30 Stunden, bis die Versorgung wieder läuft. Eine Studie für das Parlament (2022) nennt 10 bis 24 Stunden bis zu einem voll versorgten Übertragungsnetz. Das sind Richtwerte und keine Prognose.
-- **Grenzen dieser Übersicht**: Medienberichte belegen einen Ausfall, aber weder Dauer noch Ende. Lastdaten kommen mit zwei bis drei Stunden Verzögerung, die Zeiten daraus stimmen aber. Betroffenenzahlen sind grobe Schätzungen (Zahlen aus Schlagzeilen oder Anteil mal Einwohner).
+- **Grenzen dieser Übersicht**: Medienberichte belegen einen Ausfall, aber weder Dauer noch Ende. Lastdaten kommen je nach Land mit zwei bis fünf Stunden Verzögerung, die Zeiten daraus stimmen aber. Bei einem großen Ausfall können sie ganz ausbleiben, und rund um Feiertage sind Tiefe und Ende daraus ungenau. Betroffenenzahlen sind grobe Schätzungen (Zahlen aus Schlagzeilen oder Anteil mal Einwohner).
 """
 CREDITS = ("Datenquellen: Energy-Charts (Fraunhofer ISE, CC BY 4.0, energy-charts.info), "
            "netzfrequenzmessung.de, Google News, Störmeldungen der LINZ NETZ GmbH, "

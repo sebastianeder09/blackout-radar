@@ -42,7 +42,8 @@
 # clear_mhz = 100
 
 [sources.load]
-# countries = ["at", "de", "cz", "sk", "hu", "si", "it", "ch", "fr", "es", "pt", "pl"]
+# countries = ["at", "de", "cz", "sk", "hu", "ch", "fr", "es", "pt", "pl"]
+#                                 # ohne Italien und Slowenien: deren Werte waren bei der Prüfung lückenhaft
 # drop_threshold = 0.20           # Einbruch gegenüber dem Vortag, ab dem die Stromlast als auffällig gilt
 
 [sources.utility]

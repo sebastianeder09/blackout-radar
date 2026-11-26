@@ -140,11 +140,22 @@ def probe_load(cfg: dict, now) -> None:
 REPLAYS = [
     ("es", "2025-04-25T00:00Z", "2025-04-30T12:00Z", "Stromausfall Iberische Halbinsel, 28.04.2025"),
     ("pt", "2025-04-25T00:00Z", "2025-04-30T12:00Z", "Stromausfall Iberische Halbinsel, 28.04.2025"),
+    ("cz", "2025-07-01T00:00Z", "2025-07-06T00:00Z", "Stromausfall in Prag und Nordböhmen, 04.07.2025"),
+    ("hr", "2024-06-18T00:00Z", "2024-06-23T00:00Z", "Stromausfall am Westbalkan, 21.06.2024"),
+    ("ba", "2024-06-18T00:00Z", "2024-06-23T00:00Z", "Stromausfall am Westbalkan, 21.06.2024"),
+    ("me", "2024-06-18T00:00Z", "2024-06-23T00:00Z", "Stromausfall am Westbalkan, 21.06.2024"),
+    ("al", "2024-06-18T00:00Z", "2024-06-23T00:00Z", "Stromausfall am Westbalkan, 21.06.2024"),
     ("at", None, None, "die letzten 14 Tage, Normalbetrieb"),
-    ("at", "2026-04-27T00:00Z", "2026-05-05T00:00Z", "Woche mit Feiertag am Freitag, 01.05.2026"),
-    ("at", "2025-12-27T00:00Z", "2026-01-08T00:00Z", "Jahreswechsel mit Feiertagen am 01.01. und 06.01.2026"),
-    ("de", None, None, "die letzten 14 Tage, Normalbetrieb"),
 ]
+_NOT_GENERATION = {"load", "residual_load", "renewable_share_of_load", "renewable_share_of_generation",
+                   "cross_border_electricity_trading"}
+
+
+def _generation(values: dict):
+    """Summe der Erzeugung einer Zeile, None wenn dazu nichts gemeldet ist."""
+    parts = [value for key, value in values.items()
+             if key not in _NOT_GENERATION and not key.endswith("_consumption") and value is not None]
+    return round(sum(parts)) if parts else None
 
 
 def replay(country: str, points: list, section: dict, lead_hours: int = 48) -> list:
@@ -181,22 +192,24 @@ def probe_replay(cfg: dict, now) -> None:
             continue
         rows = doc.get("data") or []
         points = energy_charts.to_points(doc)
-        if len(points) < 200:
+        if len(points) < 60:
             print(f"  zu wenige Lastwerte: {len(points)} in {len(rows)} Zeilen")
             continue
         step = int(doc.get("interval_minutes") or 15)
         lookup = {parse_ts(stamp): value for stamp, value in points}
+        produced = {parse_ts(row.get("timestamp")): _generation(row.get("values") or {}) for row in rows}
         first, last = parse_ts(points[0][0]), parse_ts(points[-1][0])
-        grid, when = [], first
+        grid, made, when = [], [], first
         while when <= last:
             value = lookup.get(when)
             grid.append(None if value is None else round(value))
+            made.append(produced.get(when))
             when += timedelta(minutes=step)
         gaps = [iso(first + timedelta(minutes=step * i)) for i, value in enumerate(grid) if value is None]
         print(f"  {len(points)} Werte im Raster {step} min von {iso(first)} bis {iso(last)}, "
               f"{len(gaps)} Lücken" + (f", erste: {gaps[:6]}" if gaps else ""))
-        print("  REIHE", json.dumps({"country": country, "start": iso(first), "step_min": step, "load": grid},
-                                    separators=(",", ":")))
+        print("  REIHE", json.dumps({"country": country, "start": iso(first), "step_min": step, "load": grid,
+                                     "generation": made if start else None}, separators=(",", ":")))
         found = replay(country, points, section)
         if not found:
             print("  Auswertung: kein Befund im ganzen Zeitraum")

@@ -19,3 +19,12 @@ jobs:
         run: python3 --version
       - name: Quelltext übersetzen
         run: python3 -m compileall -q blackout_radar
+
+  live:
+    name: Datenquellen live
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Diagnose der Datenquellen
+        run: python3 -m blackout_radar.probe

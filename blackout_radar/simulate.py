@@ -59,7 +59,7 @@ def _signal(source: str, area: str, value, since, now) -> Signal:
             return Signal("load", "load_drop", area, observed_at=data_time, severity=value, started_at=since,
                           confirmed_power=True, detail=detail)
         return Signal("load", "load_drop", area, observed_at=data_time, active=False, severity=0.0, started_at=since,
-                      ended_at=data_time, confirmed_power=True, detail="Stromlast wieder normal")
+                      ended_at=data_time, confirmed_power=True, detail="Stromlast wieder im üblichen Bereich")
     share, detail = value
     return Signal("media", "media_outage", area, observed_at=now, severity=share, started_at=since,
                   confirmed_power=True, detail=detail)

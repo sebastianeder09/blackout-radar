@@ -30,7 +30,8 @@ def media(area: str, share, since: datetime, now: datetime, active: bool = True,
 def load(area: str, drop, since: datetime, data_time: datetime, active: bool = True) -> Signal:
     if not active:
         return Signal("load", "load_drop", area, observed_at=data_time, active=False, severity=0.0,
-                      started_at=since, ended_at=data_time, confirmed_power=True, detail="Stromlast wieder normal")
+                      started_at=since, ended_at=data_time, confirmed_power=True,
+                      detail="Stromlast wieder im üblichen Bereich")
     return Signal("load", "load_drop", area, observed_at=data_time, severity=drop, started_at=since,
                   confirmed_power=True, detail=f"Stromlast −{round(drop * 100)} %")
 

@@ -101,18 +101,34 @@ Alle Schwellen stehen in [`config.toml`](config.toml), jeweils mit Erklärung. O
 | Quelle | Liefert | Verzögerung | Stand der Prüfung |
 |---|---|---|---|
 | Netzfrequenz (Energy-Charts, Ersatz: netzfrequenzmessung.de, laut Anbieter nur für privaten Gebrauch) | Frequenz im Verbundnetz Kontinentaleuropa, sekundengenau | 1 bis 2 Minuten | live geprüft |
-| Stromlast (Energy-Charts, Daten von ENTSO-E) | Verbrauch je Land für Österreich und 11 weitere Länder | 2 bis 3 Stunden | live geprüft |
+| Stromlast (Energy-Charts, Daten von ENTSO-E) | Verbrauch je Land für Österreich und 9 weitere Länder (DE, CZ, SK, HU, CH, FR, ES, PT, PL) | 2 bis 5 Stunden | live geprüft, Auswertung an 4 echten Stromausfällen nachgespielt |
 | Medien (Google News) | Schlagzeilen in 6 Sprachen, gezielte Suchen für Oberösterreich und Österreich | je nach Berichterstattung, geschätzt 15 bis 90 Minuten | live geprüft |
 | Störmeldungen LINZ NETZ | öffentliche Störungsseite, zählt für Oberösterreich | wenige Minuten | Seite wird gelesen, eine echte Störung war beim Einrichten nicht aktiv |
 | IODA (Georgia Tech) | Internet-Ausfälle weltweit | | abgeschaltet, der Dienst war beim Einrichten nicht erreichbar |
 | Cloudflare Radar | Internet-Ausfälle mit Ursache | | abgeschaltet, braucht ein eigenes Token, ungeprüft |
+
+### Gegenprobe mit echten Stromausfällen
+
+Die Auswertung der Stromlast wurde mit den echten Werten vergangener Ausfälle nachgespielt. Die Reihen liegen als Tests im Repository (`tests/data/lastreihen.json`).
+
+| Ausfall | Was die Lastwerte zeigen | Ergebnis der Auswertung |
+|---|---|---|
+| Portugal, 28.04.2025 | Einbruch um 98 %, Wiederaufbau am Abend | Beginn richtig, Ende um 23 Uhr UTC, so wie das Netz wieder stand |
+| Spanien, 28.04.2025 | **keine Werte**, eineinhalb Tage lang | kein Befund, der Lagebericht zeigt "keine neuen Werte seit ..." |
+| Tschechien, 04.07.2025 | Einbruch um 28 %, vier Stunden | Beginn und Ende richtig |
+| Bosnien und Montenegro, 21.06.2024 | Einbruch um 83 % und 67 %, zwei bis drei Stunden | Beginn und Ende richtig, kein Scheinbefund am Tag danach |
+| 8 ruhige Wochen in Österreich und Deutschland, mit Weihnachten, Neujahr, Dreikönig und 1. Mai | Feiertage und Wochenenden | kein Befund |
+
+Italien und Slowenien werden nicht überwacht: Ihre Lastwerte waren bei der Prüfung lückenhaft (einzelne Viertelstunden und die neuesten Werte nur zum Teil gemeldet).
 
 ## Grenzen
 
 - **Kein Messnetz für Stromausfälle.** Es gibt weltweit keine offene Echtzeit-Quelle für Stromausfälle. Das Programm kombiniert Indizien. Betroffenenzahlen sind grobe Schätzungen.
 - **Medienberichte** belegen, dass etwas passiert ist, aber weder Dauer noch Ende. Ein Ausfall, der nur aus Medien bekannt ist, bekommt deshalb eine Meldung "(laut Medien)" und keine Entwarnung.
 - **Schlagzeilen** entscheiden, ob ein Bericht zählt. Vorsorge, Übungen, Warnungen und Aufarbeitung werden aussortiert, im Deutschen zählt das Wort "Blackout" allein nicht. Für Oberösterreich genügt ein Bericht, dessen Schlagzeile einen Ort in Oberösterreich nennt. Nennt sie keinen Ort, braucht es ein zweites Medium. Ganz ausschließen lassen sich Fehlalarme und übersehene Berichte damit nicht.
-- **Lastdaten kommen 2 bis 3 Stunden verzögert.** Die Zeiten in den Meldungen stimmen, aber Wiederherstellung und Entwarnung erfährt man entsprechend später. Im Ernstfall sind Radio (ORF) und Behörden schneller.
+- **Lastdaten kommen 2 bis 5 Stunden verzögert**, je nach Land. Die Zeiten in den Meldungen stimmen, aber Wiederherstellung und Entwarnung erfährt man entsprechend später. Im Ernstfall sind Radio (ORF) und Behörden schneller.
+- **Lastdaten können bei einem großen Ausfall ganz ausbleiben.** In Spanien meldete der Netzbetreiber am 28.04.2025 ab Beginn des Ausfalls eineinhalb Tage lang keine Werte. Dann gibt es von dieser Quelle weder Bestätigung noch Entwarnung, die Meldungen stützen sich auf Netzfrequenz und Medien. Der Lagebericht zeigt in so einem Fall "keine neuen Werte seit ..." statt eines alten, normal aussehenden Werts. Ausbleibende Werte allein sind kein Beleg für einen Ausfall.
+- **Kleine und kurze Einbrüche** sieht die Stromlast nicht: Ein Befund braucht mindestens 20 % weniger Last als an vergleichbaren Tagen, über mindestens zwei Werte. Als beendet gilt ein Einbruch, wenn die Last wieder bis auf 10 % am üblichen Wert liegt.
 - **Verlauf innerhalb Österreichs:** Gemessen wird je Land. Welches Bundesland zuerst wieder Strom hat, lässt sich aus offenen Daten nicht ablesen. Für Oberösterreich gibt es nur Medienberichte und die Störmeldungen der LINZ NETZ (Linz und Umgebung).
 - **Wann das Netz wieder läuft**, kann niemand vorhersagen. Die Meldung nennt bei einem Blackout in Österreich den Richtwert der APG aus Simulationen (2021): im besten Fall etwa 10 Stunden, längstens 20 bis 30 Stunden ([ORF](https://orf.at/stories/3230171/)). Eine Studie für das Parlament (2022) nennt 10 bis 24 Stunden bis zu einem voll versorgten Übertragungsnetz ([Trending Topics](https://www.trendingtopics.eu/blackout-oesterreich-studie/)).
 - **GitHub** startet geplante Läufe nicht pünktlich. Verzögerungen von 5 bis 20 Minuten sind normal, einzelne Läufe fallen aus. Nach einer Lücke von 90 Minuten kommt eine Meldung.
@@ -133,7 +149,7 @@ set -a; . ./.env; set +a
 python3 -m blackout_radar daemon
 ```
 
-Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anzeigen), `status`, `test-push`, `simulate`, `probe`. Der Zustand liegt dann unter `data/`. Ein Rechner im eigenen Haus fällt bei einem Stromausfall allerdings mit aus.
+Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anzeigen), `status`, `test-push`, `simulate`, `probe` (Diagnose der Datenquellen), `probe --only replay` (lädt die Lastwerte der echten Ausfälle neu und spielt sie durch). Der Zustand liegt dann unter `data/`. Ein Rechner im eigenen Haus fällt bei einem Stromausfall allerdings mit aus.
 
 ## Aufbau
 
@@ -148,4 +164,4 @@ Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anze
 | `.github/workflows/monitor.yml` | Lauf alle 5 Minuten, Zustand im Zweig `state` |
 | `.github/workflows/ci.yml` | Tests und Probelauf gegen die echten Datenquellen bei jeder Änderung |
 
-Datenquellen: Energy-Charts (Fraunhofer ISE, CC BY 4.0), netzfrequenzmessung.de, Google News, Störmeldungen der LINZ NETZ GmbH.
+Datenquellen: Energy-Charts (Fraunhofer ISE, Daten von ENTSO-E, CC BY 4.0, energy-charts.info), netzfrequenzmessung.de, Google News, Störmeldungen der LINZ NETZ GmbH.

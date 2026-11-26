@@ -4,11 +4,12 @@ Die Lastdaten kommen mit zwei bis fünf Stunden Verzögerung. Sie eignen sich de
 nicht für den ersten Alarm, aber als Bestätigung ("es ist wirklich Strom") und um
 den Netzwiederaufbau zu verfolgen, solange der Netzbetreiber weiter meldet.
 
-Erwartungswert: die Last zur selben Uhrzeit an drei Vergleichstagen (gestern, vorgestern,
-derselbe Wochentag der Vorwoche), jeweils angepasst um das Niveau der letzten Stunden
-(Wetter, Feiertag). Als Einbruch zählt nur, was gegenüber allen Vergleichstagen fehlt.
-Ein einzelner Vergleichstag führt in die Irre: Der Samstag nach einem heißen Freitag
-sieht sonst wie ein Ausfall aus, ebenso der Tag nach einem echten Ausfall.
+Erwartungswert: die Last zur selben Uhrzeit an Vergleichstagen gleicher Art (Werktag,
+Samstag oder Sonntag): gestern, vorgestern und derselbe Wochentag der Vorwoche, jeweils
+angepasst um das Niveau der letzten Stunden (Wetter, Feiertag). Als Einbruch zählt nur,
+was gegenüber allen Vergleichstagen fehlt. Ein beliebiger Vortag führt in die Irre: Der
+Samstag nach einem heißen Freitag sieht sonst wie ein Ausfall aus, ebenso der Tag nach
+einem echten Ausfall, und nach einem Ausfall am Montag käme die Entwarnung Stunden zu spät.
 
 Was echte Daten gezeigt haben (tests/data/lastreihen.json, tests/test_real_load.py):
   - Die neuesten Werte sind manchmal erst zum Teil gemeldet und werden später ergänzt.
@@ -32,6 +33,7 @@ from ..model import Signal, fmt_pct, iso, parse_ts
 
 SOURCE = "load"
 REFERENCE_DAYS = (1, 2, 7)  # Vergleichstage: gestern, vorgestern, derselbe Wochentag der Vorwoche
+FACTOR_RANGE = (0.7, 1.4)   # so weit darf das Niveau vom Vergleichstag abweichen (Feiertag gegen Werktag)
 MAX_SLOTS = 5000            # größte Reihe, die als Raster gespeichert wird
 
 
@@ -50,6 +52,16 @@ def _mw(value: float) -> str:
 
 def area_code(country: str) -> str:
     return "GB" if country.lower() == "uk" else country.upper()
+
+
+def local_day(when):
+    """Kalendertag nach mitteleuropäischer Zeit."""
+    return (when + timedelta(hours=1)).date()
+
+
+def day_type(when) -> int:
+    """Art des Tages: 0 Werktag, 1 Samstag, 2 Sonntag."""
+    return max(0, local_day(when).weekday() - 4)
 
 
 # ------------------------------------------------------------------- Abruf
@@ -81,7 +93,9 @@ def merge(known: list, fresh: list, now, hours: int, keep_hours: int) -> list:
     ältere Werte bleiben, bis sie aus dem Verlauf fallen.
     """
     since, oldest = iso(now - timedelta(hours=hours)), iso(now - timedelta(hours=keep_hours))
-    return [point for point in known if oldest <= point[0] < since] + [p for p in fresh if p[0] >= oldest]
+    merged = {stamp: value for stamp, value in known if stamp < since}
+    merged.update((stamp, value) for stamp, value in fresh)
+    return [[stamp, merged[stamp]] for stamp in sorted(merged) if stamp >= oldest]
 
 
 def pack(points: list):
@@ -143,6 +157,12 @@ def analyse(country: str, points: list, events: dict, cfg: dict, now, past: dict
         ref_time = when - timedelta(days=days)
         return lookup.get(ref_time) if usable(ref_time) else None
 
+    def references(when) -> list:
+        """Vergleichswerte als (Tage zurück, MW). Tage gleicher Art haben Vorrang."""
+        found = [(days, ref) for days in REFERENCE_DAYS if (ref := reference(when, days))]
+        alike = [(days, ref) for days, ref in found if day_type(when - timedelta(days=days)) == day_type(when)]
+        return alike or found
+
     def level_factors(before) -> dict:
         """Je Vergleichstag: um wie viel die Last in den drei Stunden davor höher oder tiefer lag."""
         first = bisect.bisect_left(times, before - timedelta(hours=3))
@@ -151,32 +171,36 @@ def analyse(country: str, points: list, events: dict, cfg: dict, now, past: dict
         for days in REFERENCE_DAYS:
             ratios = [value / ref for when, value in window if (ref := reference(when, days))]
             if len(ratios) >= 3:
-                factors[str(days)] = round(min(1.25, max(0.75, statistics.median(ratios))), 4)
+                factors[str(days)] = round(min(FACTOR_RANGE[1], max(FACTOR_RANGE[0], statistics.median(ratios))), 4)
         return factors
 
-    def drop_at(when, value, factors, plain: bool = False):
-        """Einbruch gegenüber dem günstigsten Vergleichstag als (Anteil, erwartete Last), sonst None.
+    def drop_at(when, value, factors, begin):
+        """Einbruch gegenüber dem günstigsten Vergleichstag, sonst None.
 
-        plain: zusätzlich ohne Niveau-Faktor vergleichen. Das gilt für die Erholung: Der Faktor stammt
-        aus den Stunden vor dem Einbruch und passt Stunden später oft nicht mehr.
+        Liefert (Anteil mit Niveau-Faktor, Anteil ohne, erwartete Last). Der Faktor stammt aus den
+        Stunden vor dem Einbruch (begin). Er vergleicht den Tag des Beginns mit einem Vergleichstag
+        und gilt deshalb nur an diesem Tag. Nur der Abstand zur Vorwoche lässt sich auf die
+        folgenden Tage übertragen. Weil der Faktor Stunden später oft nicht mehr passt, zählt für
+        Beginn und Ende auch der Vergleich ohne Faktor: Ein Einbruch muss in beiden zu sehen sein,
+        für die Erholung reicht einer. So kann ein eben beendeter Einbruch nicht sofort wieder anschlagen.
         """
-        found = []
-        for days in REFERENCE_DAYS:
-            ref = reference(when, days)
-            if ref:
-                expected = ref * factors.get(str(days), 1.0)
-                found.append((1 - value / expected, expected))
-                if plain:
-                    found.append((1 - value / ref, ref))
-        return min(found) if found else None
+        found = references(when)
+        if not found:
+            return None
+        same_day = local_day(when) == local_day(begin)
+        scaled, expected = min((1 - value / (ref * factor), ref * factor) for days, ref in found
+                               for factor in [factors.get(str(days), 1.0) if same_day or days == 7 else 1.0])
+        return scaled, min(1 - value / ref for _, ref in found), expected
+
+    def low(found) -> bool:
+        return found is not None and found[0] >= cfg["drop_threshold"] and found[1] >= cfg["recover_threshold"]
 
     area = area_code(country)
     if event is None:
         run = []
         for when, value in series[bisect.bisect_left(times, latest_t - timedelta(hours=3)):]:
             factors = run[0][1] if run else level_factors(when)
-            found = drop_at(when, value, factors)
-            if found is not None and found[0] >= cfg["drop_threshold"]:
+            if low(drop_at(when, value, factors, run[0][0] if run else when)):
                 run.append((when, factors))
             else:
                 run = []
@@ -190,8 +214,8 @@ def analyse(country: str, points: list, events: dict, cfg: dict, now, past: dict
     for when, value in reversed(series):
         if when < event_start:
             break
-        found = drop_at(when, value, factors, plain=True)
-        if found is None or found[0] >= cfg["recover_threshold"]:
+        found = drop_at(when, value, factors, event_start)
+        if found is None or min(found[0], found[1]) >= cfg["recover_threshold"]:
             break
         calm.append(when)
     if len(calm) >= 2:
@@ -202,12 +226,12 @@ def analyse(country: str, points: list, events: dict, cfg: dict, now, past: dict
                        started_at=event_start, ended_at=calm[-1], confirmed_power=True,
                        detail="Stromlast wieder im üblichen Bereich")]
 
-    found = drop_at(latest_t, latest_v, factors)
+    found = drop_at(latest_t, latest_v, factors, event_start)
     if found is None:
         drop, expected = event.get("last_drop", cfg["drop_threshold"]), None
         detail = f"Stromlast {fmt_pct(drop)} (kein Vergleichswert, {_mw(latest_v)} MW)"
     else:
-        drop, expected = max(0.0, found[0]), found[1]
+        drop, expected = max(0.0, found[0]), found[2]
         detail = f"Stromlast {fmt_pct(drop)} ({_mw(latest_v)} statt {_mw(expected)} MW)"
     event["last_drop"] = round(drop, 3)
     return [Signal(SOURCE, "load_drop", area, observed_at=latest_t, active=True, severity=round(drop, 3),

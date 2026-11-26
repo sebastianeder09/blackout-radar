@@ -236,6 +236,59 @@ class LoadCollector(unittest.TestCase):
         self.assertEqual(parse_ts(cursor["next_poll"]["de"]), at(360))  # unbekanntes Land: erst in 6 Stunden wieder
         self.assertEqual(parse_ts(cursor["next_poll"]["at"]), at(15))
 
+    def test_series_is_stored_compactly_and_restored(self):
+        points = load_series(at(-165), points=40)
+        del points[5]  # eine Lücke
+        stored = energy_charts.pack(points)
+        self.assertEqual((stored["t0"], stored["step"], len(stored["v"])), (points[0][0], 15, 40))
+        self.assertIsNone(stored["v"][5])
+        restored = energy_charts.unpack(stored)
+        self.assertEqual([stamp for stamp, _ in restored], [stamp for stamp, _ in points])
+        self.assertTrue(all(abs(new[1] - old[1]) <= 0.5 for new, old in zip(restored, points, strict=True)))
+        self.assertEqual(energy_charts.unpack(points), points)  # die frühere Form bleibt lesbar
+        odd = points[:3] + [[iso(at(-7)), 5000.0]]  # passt in kein Raster
+        self.assertEqual(energy_charts.pack(odd), odd)
+
+    def test_refreshed_hours_replace_what_was_stored(self):
+        known = load_series(at(-165), points=200)
+        fresh = [point for point in load_series(at(-150), points=120) if point[0] != iso(at(-300))]
+        merged = energy_charts.merge(known, fresh, at(0), 30, 48)
+        stamps = [stamp for stamp, _ in merged]
+        self.assertEqual(stamps, sorted(set(stamps)))
+        self.assertNotIn(iso(at(-300)), stamps)  # dieser Wert ist nachträglich verschwunden
+        self.assertEqual((stamps[0], stamps[-1]), (iso(at(-48 * 60)), iso(at(-150))))
+
+    def test_whole_history_once_a_day_otherwise_only_recent_hours(self):
+        cursor, asked = {}, []
+
+        def fake(base, country, now, hours):
+            asked.append((country, hours))
+            return load_series(now - timedelta(minutes=165), points=hours * 4 - 10)
+
+        with mock.patch.object(energy_charts, "fetch_load", side_effect=fake):
+            energy_charts.collect(self.cfg, cursor, at(0), {})
+            energy_charts.collect(self.cfg, cursor, at(15), {})
+            self.assertEqual(asked, [("at", 200), ("de", 200), ("at", 30), ("cz", 200)])
+            stored = energy_charts.unpack(cursor["series"]["at"])
+            self.assertEqual((stored[0][0], stored[-1][0], len(stored)), (iso(at(-11985)), iso(at(-150)), 790))
+            asked.clear()
+            energy_charts.collect(self.cfg, cursor, at(24 * 60), {})
+        self.assertEqual(asked[0], ("at", 200))
+
+    def test_earlier_outages_are_no_reference(self):
+        """Am Tag nach einem Ausfall darf dessen Tiefe nicht als normaler Vergleichswert gelten."""
+        newest = at(-165)
+        yesterday = load_series(newest, points=880)
+        for point in yesterday[-96 - 8: -96 + 8]:  # gestern zur selben Zeit: vier Stunden Ausfall
+            point[1] = round(point[1] * 0.3, 1)
+        today = [list(point) for point in yesterday]
+        for point in today[-6:]:
+            point[1] = round(point[1] * 0.5, 1)
+        past = {"at": [[yesterday[-96 - 8][0], yesterday[-96 + 8][0]]]}
+        signal = energy_charts.analyse("at", today, {}, self.cfg, at(0), past)[0]
+        self.assertAlmostEqual(signal.severity, 0.5, places=1)
+        self.assertEqual(energy_charts.analyse("at", yesterday, {}, self.cfg, at(0), past), [])
+
     def test_values_that_stop_coming_are_marked(self):
         """Beim Stromausfall in Spanien am 28.04.2025 blieben die Lastwerte eineinhalb Tage lang aus."""
         cursor = {}

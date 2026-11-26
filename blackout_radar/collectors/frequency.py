@@ -4,8 +4,11 @@ Die Frequenz ist im ganzen Verbundnetz gleich. Eine Abweichung ab 200 mHz ist
 selten und zeigt eine schwere Störung an, lange bevor Nachrichten erscheinen.
 
 Anbieter in dieser Reihenfolge:
-  energy_charts        Sekundenwerte, Messung Fraunhofer ISE Freiburg (CC BY 4.0)
-  netzfrequenzmessung  ein aktueller Wert als XML (laut Anbieter für privaten Gebrauch)
+  energy_charts        Sekundenwerte, Messung Fraunhofer ISE Freiburg (CC BY 4.0).
+                       Jeder Lauf holt alle Werte seit dem letzten Lauf, damit auch
+                       kurze Einbrüche zwischen zwei Läufen nicht verloren gehen.
+  netzfrequenzmessung  ein aktueller Wert als XML (laut Anbieter für privaten Gebrauch).
+                       Nur Ersatz: zwischen zwei Läufen sieht dieser Weg nichts.
 """
 from __future__ import annotations
 
@@ -55,11 +58,26 @@ def _smooth(rows: list) -> list:
     return [(rows[i][0], statistics.median(values[max(0, i - 2): i + 3])) for i in range(len(rows))]
 
 
+def _sample(rows: list, cfg: dict) -> dict:
+    """Fasst Messwerte (Zeit, Hz) zu einem Befund zusammen."""
+    alarm, clear = cfg["alarm_mhz"] / 1000.0, cfg["clear_mhz"] / 1000.0
+    low, high = min(rows, key=lambda r: r[1]), max(rows, key=lambda r: r[1])
+    return {
+        "t": rows[-1][0], "f": rows[-1][1], "n": len(rows),
+        "min": low[1], "t_min": low[0], "max": high[1], "t_max": high[0],
+        "t_breach": next((t for t, v in rows if abs(v - 50.0) >= alarm), None),    # erste Verletzung der Alarmgrenze
+        "t_uneasy": next((t for t, v in reversed(rows) if abs(v - 50.0) >= clear), None),  # zuletzt außerhalb der Ruhegrenze
+    }
+
+
 def from_energy_charts(cfg: dict, cursor: dict, now) -> dict:
     base = cfg["energy_charts_url"].rstrip("/")
+    seen = parse_ts(cursor.get("ec_last"))
     start = now - timedelta(minutes=cfg["window_minutes"])
+    if seen:
+        start = max(seen - timedelta(seconds=30), now - timedelta(minutes=cfg["catchup_minutes"]))
     doc = http.get_json(f"{base}/v2/frequency", timeout=30, params={
-        "region": "DE-Freiburg", "start": _fmt(start), "end": _fmt(now + timedelta(minutes=1))})
+        "region": cfg["energy_charts_region"], "start": _fmt(start), "end": _fmt(now + timedelta(minutes=1))})
     rows = []
     for row in doc.get("data") or []:
         value = (row.get("values") or {}).get("frequency")
@@ -72,12 +90,9 @@ def from_energy_charts(cfg: dict, cursor: dict, now) -> dict:
     newest = rows[-1][0]
     if now - newest > timedelta(minutes=cfg["max_age_minutes"]):
         raise HttpError(f"Frequenzdaten von Energy-Charts veraltet (Stand {iso(newest)})")
-    seen = parse_ts(cursor.get("ec_last"))
-    fresh = [row for row in _smooth(rows) if seen is None or row[0] > seen] or rows[-1:]
+    fresh = [row for row in _smooth(rows) if seen is None or row[0] > seen] or [rows[-1]]
     cursor["ec_last"] = iso(newest)
-    low, high = min(fresh, key=lambda r: r[1]), max(fresh, key=lambda r: r[1])
-    return {"t": newest, "f": rows[-1][1], "min": low[1], "t_min": low[0],
-            "max": high[1], "t_max": high[0], "n": len(fresh)}
+    return _sample(fresh, cfg)
 
 
 def from_netzfrequenzmessung(cfg: dict, cursor: dict, now) -> dict:
@@ -92,7 +107,7 @@ def from_netzfrequenzmessung(cfg: dict, cursor: dict, now) -> dict:
         raise HttpError(f"unplausibler Frequenzwert {value}")
     if when is None or now - when > timedelta(minutes=cfg["max_age_minutes"]):
         raise HttpError("Frequenzwert von netzfrequenzmessung.de veraltet")
-    return {"t": when, "f": value, "min": value, "t_min": when, "max": value, "t_max": when, "n": 1}
+    return _sample([(when, value)], cfg)
 
 
 PROVIDERS = {"energy_charts": from_energy_charts, "netzfrequenzmessung": from_netzfrequenzmessung}
@@ -101,27 +116,25 @@ PROVIDERS = {"energy_charts": from_energy_charts, "netzfrequenzmessung": from_ne
 def analyse(sample: dict, cfg: dict, cursor: dict) -> list[Signal]:
     alarm, clear = cfg["alarm_mhz"] / 1000.0, cfg["clear_mhz"] / 1000.0
     low, high = 50.0 - sample["min"], sample["max"] - 50.0
-    worst_hz, worst_t = (sample["min"], sample["t_min"]) if low >= high else (sample["max"], sample["t_max"])
-    worst_dev = max(low, high)
-    current_dev = abs(sample["f"] - 50.0)
+    worst_hz = sample["min"] if low >= high else sample["max"]
     event = cursor.get("event")
-    if worst_dev >= alarm:
+    if sample["t_breach"] is not None:
         if event is None:
-            event = cursor["event"] = {"start": iso(worst_t), "worst_hz": worst_hz, "calm": 0}
+            event = cursor["event"] = {"start": iso(sample["t_breach"]), "worst_hz": worst_hz}
         elif abs(worst_hz - 50.0) > abs(event["worst_hz"] - 50.0):
             event["worst_hz"] = worst_hz
-        event["calm"] = 0
-    elif event is not None:
-        event["calm"] = event.get("calm", 0) + 1 if current_dev < clear else 0
     if event is None:
         return []
+    if sample["t_uneasy"] is not None:
+        event["uneasy"] = iso(sample["t_uneasy"])
     worst = event["worst_hz"]
-    metrics = {"worst_hz": worst, "current_hz": sample["f"], "provider": sample.get("provider", "")}
     start = parse_ts(event["start"])
-    if event["calm"] >= 2:
+    uneasy = parse_ts(event.get("uneasy")) or start
+    metrics = {"worst_hz": worst, "current_hz": sample["f"], "provider": sample.get("provider", "")}
+    if abs(sample["f"] - 50.0) < clear and sample["t"] - uneasy >= timedelta(minutes=cfg["calm_minutes"]):
         del cursor["event"]
         return [Signal(SOURCE, "frequency", AREA, observed_at=sample["t"], active=False, severity=0.0,
-                       started_at=start, ended_at=sample["t"], metrics=metrics,
+                       started_at=start, ended_at=max(uneasy, start), metrics=metrics,
                        detail=f"Netzfrequenz wieder bei {hz(sample['f'])} Hz, größte Abweichung war {hz(worst)} Hz")]
     detail = (f"Netzfrequenz {hz(worst)} Hz statt 50,000 Hz "
               f"(Alarmgrenze ±{cfg['alarm_mhz']} mHz), aktuell {hz(sample['f'])} Hz")
@@ -130,6 +143,24 @@ def analyse(sample: dict, cfg: dict, cursor: dict) -> list[Signal]:
         detail += f". Stufe laut Notfallplan: {stage}"
     return [Signal(SOURCE, "frequency", AREA, observed_at=sample["t"], active=True,
                    severity=round(min(1.0, abs(worst - 50.0)), 3), started_at=start, detail=detail, metrics=metrics)]
+
+
+def remember(cursor: dict, sample: dict) -> None:
+    """Merkt sich je Stunde den kleinsten und größten Wert, für die Spanne der letzten 24 Stunden."""
+    hours = cursor.setdefault("hours", {})
+    key = iso(sample["t"])[:13]
+    low, high = hours.get(key) or (sample["min"], sample["max"])
+    hours[key] = [min(low, sample["min"]), max(high, sample["max"])]
+    for old in sorted(hours)[:-25]:
+        del hours[old]
+
+
+def day_range(cursor: dict, now) -> tuple[float, float] | None:
+    limit = iso(now - timedelta(hours=24))[:13]
+    spans = [span for key, span in (cursor.get("hours") or {}).items() if key >= limit]
+    if not spans:
+        return None
+    return min(span[0] for span in spans), max(span[1] for span in spans)
 
 
 def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
@@ -150,4 +181,5 @@ def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
     cursor["data_time"] = iso(sample["t"])
     cursor["last"] = {"hz": sample["f"], "min": sample["min"], "max": sample["max"], "t": iso(sample["t"]),
                       "provider": sample["provider"], "n": sample["n"]}
+    remember(cursor, sample)
     return analyse(sample, cfg, cursor)

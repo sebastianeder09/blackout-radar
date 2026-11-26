@@ -39,8 +39,9 @@ DEFAULTS: dict = {
         "frequency": {
             "enabled": True,
             "providers": ["energy_charts", "netzfrequenzmessung"],
-            "alarm_mhz": 200, "clear_mhz": 100, "window_minutes": 12, "max_age_minutes": 10,
-            "energy_charts_url": "https://api.energy-charts.info",
+            "alarm_mhz": 200, "clear_mhz": 100, "calm_minutes": 5,
+            "window_minutes": 12, "catchup_minutes": 120, "max_age_minutes": 10,
+            "energy_charts_url": "https://api.energy-charts.info", "energy_charts_region": "DE-Freiburg",
             "nfm_url": "https://dat.netzfrequenzmessung.de:9080/frequenz.xml",
         },
         "load": {

@@ -123,7 +123,7 @@ def probe_ioda(cfg: dict, now) -> None:
             print("  Aufbau:", outline(doc))
         return doc
 
-    if call("/entities/query", {"entityType": "country", "entityCode": "AT"}, timeout=90) is None:
+    if call("/entities/query", {"entityType": "country", "entityCode": "AT"}, timeout=40) is None:
         print("  IODA antwortet nicht, weitere Abfragen übersprungen")
         return
     doc = call("/outages/alerts", {"from": until - 12 * 3600, "until": until, "entityType": "country", "limit": 5})
@@ -160,44 +160,48 @@ def probe_ioda(cfg: dict, now) -> None:
 
 
 # ------------------------------------------------------------------- Medien
+WORLD_QUERIES = (
+    ("en-US", "US", "US:en", '"nationwide blackout" OR "massive blackout" OR "massive power outage" OR '
+                             '"major power outage" OR "widespread power outage" OR "grid collapse" OR '
+                             '"millions without power"'),
+    ("es-419", "US", "US:es-419", '"apagón masivo" OR "apagón general" OR "apagón nacional" OR "gran apagón" OR '
+                                  '"colapso del sistema eléctrico"'),
+    ("de", "DE", "DE:de", '"großflächiger Stromausfall" OR "flächendeckender Stromausfall" OR '
+                          '"massiver Stromausfall" OR "landesweiter Stromausfall" OR "Millionen ohne Strom"'),
+    ("fr", "FR", "FR:fr", '"panne de courant géante" OR "panne d\'électricité géante" OR '
+                          '"coupure de courant massive" OR "panne d\'électricité massive"'),
+    ("pt-BR", "BR", "BR:pt-419", '"apagão nacional" OR "apagão geral" OR "grande apagão" OR "milhões sem energia"'),
+    ("it", "IT", "IT:it", '"maxi blackout" OR "blackout elettrico" OR "milioni senza corrente"'),
+)
+
+
+def _google_news(query: str, language: str, country: str, edition: str, limit: int = 40) -> None:
+    text = _fetch("https://news.google.com/rss/search", {"q": query, "hl": language, "gl": country, "ceid": edition})
+    if text is None:
+        return
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as err:
+        print(f"  kein XML ({err}): {text[:300]!r}")
+        return
+    items = list(root.iter("item"))
+    print(f"  {len(items)} Einträge")
+    for item in items[:limit]:
+        print(f"    {item.findtext('pubDate')} | {item.findtext('title')}")
+    if items:
+        first = items[0]
+        source = first.find("source")
+        print("  erster Eintrag:", {"guid": first.findtext("guid"), "link": (first.findtext("link") or "")[:90],
+                                   "source": None if source is None else (source.text, source.get("url"))})
+
+
 def probe_news(cfg: dict, now) -> None:
-    section = cfg["sources"]["news"]
-    for query in section.get("priority_queries") or []:
+    for query in cfg["sources"]["news"].get("priority_queries") or []:
         language, country = query.get("hl", "de"), query.get("gl", "AT")
-        text = _fetch("https://news.google.com/rss/search", {
-            "q": query["q"] + " when:7d", "hl": language, "gl": country, "ceid": f"{country}:{language}"})
-        if text is None:
-            continue
-        try:
-            root = ET.fromstring(text)
-        except ET.ParseError as err:
-            print(f"  kein XML ({err}): {text[:300]!r}")
-            continue
-        items = list(root.iter("item"))
-        print(f"  {len(items)} Einträge")
-        for item in items:
-            print(f"    {item.findtext('pubDate')} | {item.findtext('title')}")
-    text = _fetch("https://news.google.com/rss/search", {
-        "q": '("power outage" OR blackout OR "power cut" OR "without power") Cuba when:7d',
-        "hl": "en-US", "gl": "US", "ceid": "US:en"})
-    if text is not None:
-        try:
-            items = list(ET.fromstring(text).iter("item"))
-            print(f"  {len(items)} Einträge")
-            for item in items[:12]:
-                print(f"    {item.findtext('pubDate')} | {item.findtext('title')}")
-        except ET.ParseError as err:
-            print(f"  kein XML ({err}): {text[:300]!r}")
-    for attempt in (1, 2):
-        doc = _json(_fetch(section["gdelt_url"], {
-            "query": '(blackout OR "power outage" OR Stromausfall) (Austria OR Österreich)', "mode": "artlist",
-            "format": "json", "timespan": "2880min", "maxrecords": 5, "sort": "datedesc"}))
-        if doc is not None:
-            print("  Aufbau:", outline(doc))
-            for article in (doc.get("articles") or [])[:3] if isinstance(doc, dict) else []:
-                print("   ", article)
-            break
-        time.sleep(8)
+        _google_news(query["q"] + " when:2d", language, country, f"{country}:{language}", limit=8)
+    for language, country, edition, query in WORLD_QUERIES:
+        _google_news(f"{query} when:2d", language, country, edition)
+        time.sleep(2)
 
 
 # ----------------------------------------------------------- Netzbetreiber OÖ
@@ -229,21 +233,25 @@ def probe_utility(cfg: dict, now) -> None:
             print("  Skripte:", scripts)
             for script in scripts[:6]:
                 target = script if script.startswith("http") else host + "/" + script.lstrip("./")
-                if not target.startswith(host):
-                    print("  übersprungen (anderer Server):", target)
+                if not target.startswith(host) or "vendor" in target or "geoxml" in target:
                     continue
                 code = _fetch(target)
                 if code is None:
                     continue
-                paths = _paths(code)
-                print(f"  {len(paths)} Adressen im Skript:")
-                for item in paths[:120]:
-                    print("     ", item[:200])
-            continue
+                if len(code) < 9000:
+                    print("  Volltext:", code)
+                    continue
+                for word in ("sessionCreateTokenAutologin", "queryExecuteComplete", "webEntityGet", "i1-mobileproxy",
+                             "kmlDirectoryServlet", "SpannungsloseStationen", "netzweb"):
+                    for hit in list(re.finditer(re.escape(word), code))[:3]:
+                        print(f"  Umfeld '{word}':", code[max(0, hit.start() - 350): hit.start() + 450].replace("\n", " "))
+            break
         body = re.sub(r"<script.*?</script>|<style.*?</style>", " ", text, flags=re.S | re.I)
         body = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body)).strip()
-        index = body.rfind("Aktuelle Störmeldungen")
-        print("  Inhalt ab der letzten Überschrift:", body[max(0, index - 100): index + 3000])
+        index = body.find("Zum Seitenanfang")
+        print("  Seitentext nach dem Menü:", body[2600:6500])
+        for hit in list(re.finditer("aktuelle_stoermeldungen", text))[:12]:
+            print("  Umfeld:", re.sub(r"\s+", " ", text[max(0, hit.start() - 200): hit.start() + 400]))
         for marker in ("stoermeldung", "Störung", "ui-datatable", "<table"):
             hits = [m.start() for m in re.finditer(marker, text)]
             print(f"  '{marker}': {len(hits)} Treffer")

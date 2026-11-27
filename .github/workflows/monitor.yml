@@ -128,7 +128,7 @@ jobs:
 
       - name: Diagnose
         if: env.AKTION == 'diagnose'
-        run: python3 -u -m blackout_radar probe
+        run: python3 -u tools/orte_at.py   # vorläufig: Gemeindeverzeichnis roh ausgeben
 
       - name: Zeitplan aktiv halten
         # GitHub schaltet Zeitpläne ab, wenn in einem Repository 60 Tage lang nichts geschieht.

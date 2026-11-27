@@ -4,8 +4,9 @@
 Aufruf:  seite.py <paket> [ausdruck]
 
 Ohne Ausdruck kommt der Text, der gerade in der Seite steht (document.body.innerText).
-Mit Ausdruck wird dieser in der Seite ausgewertet und sein Ergebnis ausgegeben. So lässt
-sich auch ein Knopf drücken: seite.py <paket> "document.querySelector('button').click()"
+Mit Ausdruck wird dieser in der Seite ausgewertet und sein Ergebnis ausgegeben, bei einem
+Promise das, was es am Ende liefert. So lässt sich auch ein Knopf drücken:
+seite.py <paket> "document.querySelector('button').click()"
 
 Der Weg führt über die Entwickler-Schnittstelle der WebView (dieselbe, die Chrome unter
 chrome://inspect nutzt). Auf Emulator-Abbildern ("google_apis", zum Entwickeln gebautes
@@ -135,7 +136,7 @@ def evaluate(port, expression):
     ws = WebSocket(HOST, port, path)
     try:
         ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate",
-                            "params": {"expression": expression, "returnByValue": True}}))
+                            "params": {"expression": expression, "returnByValue": True, "awaitPromise": True}}))
         while True:
             answer = json.loads(ws.receive())
             if answer.get("id") == 1:

@@ -47,6 +47,61 @@ class NtfyTest {
     }
 
     @Test
+    fun linkDerApp() {
+        val expected = Target("https://ntfy.sh", topic)
+        for (link in listOf(
+            "blackoutradar://abo/$topic",
+            "blackoutradar://abo/$topic/",
+            "BlackoutRadar://abo/$topic",
+            "blackoutradar://abo?thema=$topic",
+            "blackoutradar://abo?x=1&thema=$topic",
+            "blackoutradar://$topic",
+            "blackoutradar://abo?thema=https%3A%2F%2Fntfy.sh%2F$topic",
+        )) {
+            assertEquals(link, expected, Ntfy.parseLink(link))
+            assertEquals(link, expected, Ntfy.parseTarget(link))
+        }
+        assertEquals(Target("https://ntfy.example.org:8443", "alarm"),
+            Ntfy.parseLink("blackoutradar://abo?thema=https%3A%2F%2Fntfy.example.org%3A8443%2Falarm"))
+    }
+
+    @Test
+    fun kaputteLinks() {
+        for (link in listOf(
+            "blackoutradar://abo",
+            "blackoutradar://abo/",
+            "blackoutradar://abo/zwei/teile",
+            "blackoutradar://abo/ümlaut",
+            "blackoutradar://abo?thema=",
+            "blackoutradar://abo?thema=%zz",
+            "blackoutradar://abo?thema=http%3A%2F%2F10.0.2.2%2Fx",
+            "blackoutradar://abo?thema=blackoutradar%3A%2F%2Fabo%2Fx",
+            "https://ntfy.sh/$topic",
+            topic,
+        )) {
+            assertNull(link, Ntfy.parseLink(link))
+        }
+        // Ein kaputter Link im Text wird nicht stillschweigend als etwas anderes gelesen.
+        assertNull(Ntfy.parseTarget("blackoutradar://abo/zwei/teile"))
+    }
+
+    @Test
+    fun weitergegebeneNachrichtRichtetEin() {
+        val url = "https://github.com/sebastianeder09/blackout-radar/releases/latest/download/blackout-radar.apk"
+        for (target in listOf(Target("https://ntfy.sh", topic), Target("https://ntfy.example.org:8443", "alarm_1"))) {
+            val text = Ntfy.shareText(target, url)
+            assertTrue(text, url in text)
+            assertEquals(target, Ntfy.parseTarget(text))
+            // So kommt sie aus manchem Messenger zurück: mit Zusatz davor und Satzzeichen danach.
+            assertEquals(target, Ntfy.parseTarget("Weitergeleitet:\n$text.\n\nLG"))
+            assertEquals(target, Ntfy.parseLink(Ntfy.findLink(text)!!))
+            assertEquals(target, Ntfy.parseTarget(Ntfy.plain(target)))
+        }
+        assertEquals(topic, Ntfy.plain(Target("https://ntfy.sh", topic)))
+        assertNull(Ntfy.findLink("nur Text ohne Link, https://ntfy.sh/$topic"))
+    }
+
+    @Test
     fun adressenFuerDenServer() {
         val target = Target("https://ntfy.sh", "t1")
         assertEquals("https://ntfy.sh/t1/json?since=abc", Ntfy.streamUrl(target, "abc"))

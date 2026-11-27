@@ -46,6 +46,7 @@
     ext: '<svg viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>',
     paste: '<svg viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>',
     wifi: '<svg viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5 12.9a10 10 0 0 1 14 0"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/></svg>',
+    share: '<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></svg>',
   };
   const LOGO = '<svg class="logo" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="12" fill="#0D1B2A"/>' +
     '<circle cx="24" cy="24" r="17.6" fill="none" stroke="#3D6B8E" stroke-width="1.5"/>' +
@@ -86,22 +87,46 @@
 
   const pad = n => String(n).padStart(2, '0');
   const WD = ['So.', 'Mo.', 'Di.', 'Mi.', 'Do.', 'Fr.', 'Sa.'];
+  const WD_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  // Alle Uhrzeiten in österreichischer Zeit, so wie der Radar sie in seinen Texten schreibt.
+  // Sonst stünden auf einem Handy mit anderer Zeitzone zwei verschiedene Zeiten nebeneinander.
+  let ZONE = null;
+  try {
+    ZONE = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/Vienna', hourCycle: 'h23', weekday: 'short',
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    });
+  } catch (e) {
+    ZONE = null;  // sehr alte WebView: dann gilt die Zeit des Handys
+  }
+
+  /** Zerlegt einen Zeitpunkt: { y, mo, d, h, mi, wd } mit zweistelligen Texten und dem Wochentag 0 bis 6. */
+  function local(ms) {
+    const d = new Date(ms);
+    if (ZONE) {
+      const p = {};
+      for (const part of ZONE.formatToParts(d)) p[part.type] = part.value;
+      return { y: p.year, mo: p.month, d: p.day, h: p.hour === '24' ? '00' : p.hour, mi: p.minute, wd: WD_EN.indexOf(p.weekday) };
+    }
+    return { y: String(d.getFullYear()), mo: pad(d.getMonth() + 1), d: pad(d.getDate()), h: pad(d.getHours()), mi: pad(d.getMinutes()), wd: d.getDay() };
+  }
 
   function clock(ms) {
-    const d = new Date(ms);
-    return pad(d.getHours()) + ':' + pad(d.getMinutes());
+    const t = local(ms);
+    return t.h + ':' + t.mi;
   }
 
   function sameDay(a, b) {
-    const x = new Date(a), y = new Date(b);
-    return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+    const x = local(a), y = local(b);
+    return x.y === y.y && x.mo === y.mo && x.d === y.d;
   }
 
   function dayLabel(ms, now) {
     if (sameDay(ms, now)) return 'Heute';
     if (sameDay(ms, now - DAY)) return 'Gestern';
-    const d = new Date(ms);
-    return WD[d.getDay()] + ', ' + pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear();
+    const t = local(ms);
+    return WD[t.wd] + ', ' + t.d + '.' + t.mo + '.' + t.y;
   }
 
   /** Zeitpunkt mit Tag, wenn er nicht heute war: "11:05" oder "Gestern 23:10". */
@@ -650,6 +675,15 @@
           el('li', { text: 'Der Probealarm prüft nur Ton und Anzeige auf dem Handy. Für den ganzen Weg vom Radar über ntfy bis hierher: bei GitHub unter Actions → Blackout-Radar → Run workflow die Aktion „test-push“ starten.' }),
           el('li', null, el('a', { href: '#', onclick: e => { e.preventDefault(); N.openUrl(actionsUrl()); } }, 'Actions bei GitHub öffnen'))))));
 
+    // Weitere Handys
+    v.append(el('div', { class: 'card' },
+      el('h3', { text: 'Weitere Handys' }),
+      el('p', { class: 'small muted', text: 'Die App läuft auf beliebig vielen Handys. Die Nachricht enthält den Download und das Thema. ' +
+        'Am anderen Handy die App installieren, die Nachricht kopieren und in der App auf „Einfügen“ tippen.' }),
+      el('div', { class: 'stack' },
+        el('button', { class: 'btn', onclick: () => N.share() }, icon('share'), 'App und Thema weitergeben')),
+      el('p', { class: 'small muted', text: 'Nur an Leute, denen du vertraust: Wer das Thema kennt, kann mitlesen und selbst Meldungen schicken.' })));
+
     // Version
     const u = st.update;
     v.append(el('div', { class: 'card' },
@@ -730,6 +764,7 @@
           'Die App speichert es nur auf diesem Handy und schickt es nur an ntfy.sh.'),
         more('wo', 'Wo finde ich das Thema?',
           el('ul', null,
+            el('li', { text: 'Hat dir jemand die App weitergegeben? Dann die ganze Nachricht kopieren und hier auf „Einfügen“ tippen.' }),
             el('li', { text: 'Am PC auf ntfy.sh/app steht es links in der Liste der abonnierten Themen.' }),
             el('li', { text: 'Am einfachsten schickst du es dir selbst per E-Mail oder Messenger, kopierst es hier am Handy und tippst auf „Einfügen“.' }),
             el('li', { text: 'Es genügt der Name. Eine ganze Adresse wie https://ntfy.sh/… geht auch.' }))));

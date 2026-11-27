@@ -3,6 +3,8 @@ package io.github.sebastianeder09.blackoutradar
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.net.URLDecoder
+import java.net.URLEncoder
 
 /** Wohin die App sich verbindet: Server und Thema. */
 data class Target(val server: String, val topic: String)
@@ -76,7 +78,11 @@ sealed class StreamEvent {
 object Ntfy {
     const val DEFAULT_SERVER = "https://ntfy.sh"
 
+    /** So beginnt ein Link, der die App mit einem Thema einrichtet. */
+    const val LINK_PREFIX = "blackoutradar://abo"
+
     private val TOPIC = Regex("[-_A-Za-z0-9]{1,64}")
+    private val LINK = Regex("blackoutradar://[^\\s<>\"']+", RegexOption.IGNORE_CASE)
     private val HOST = Regex("[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?")
     private val EMOJI = mapOf(
         "rotating_light" to "🚨",
@@ -88,10 +94,12 @@ object Ntfy {
 
     /**
      * Liest das Thema aus dem, was der Mensch eingefügt hat. Erlaubt sind der reine
-     * Themenname, eine Adresse wie https://ntfy.sh/thema oder ntfy://ntfy.sh/thema.
+     * Themenname, eine Adresse wie https://ntfy.sh/thema oder ntfy://ntfy.sh/thema und
+     * ein Link der App, auch mitten in einer weitergegebenen Nachricht.
      * Unverschlüsselte Adressen (http) gelten nur im Testbau.
      */
     fun parseTarget(input: String, allowHttp: Boolean = false): Target? {
+        findLink(input)?.let { return parseLink(it, allowHttp) }
         val text = input.trim().trim('`', '"', '\'', '<', '>', '.', ',', ';', '„', '“', '”', '«', '»')
         if (text.isEmpty() || text.any { it.isWhitespace() }) return null
         var scheme = "https"
@@ -116,6 +124,56 @@ object Ntfy {
             else -> null
         }
     }
+
+    /** Der Link der App in einem Text, etwa in einer weitergegebenen Nachricht. */
+    fun findLink(text: String): String? = LINK.find(text)?.value?.trimEnd('.', ',', ';', ')')
+
+    /**
+     * Liest das Ziel aus einem Link der App: blackoutradar://abo/thema, blackoutradar://abo?thema=…
+     * (dort darf auch eine ganze Adresse stehen) oder kurz blackoutradar://thema.
+     */
+    fun parseLink(link: String, allowHttp: Boolean = false): Target? {
+        val text = link.trim()
+        if (!text.startsWith("blackoutradar://", ignoreCase = true)) return null
+        val rest = text.substring("blackoutradar://".length).substringBefore('#')
+        val query = rest.substringAfter('?', "")
+        val named = query.split('&').firstOrNull { it.startsWith("thema=") }?.substringAfter('=')
+        if (named != null) {
+            val value = try {
+                URLDecoder.decode(named, "UTF-8")
+            } catch (e: IllegalArgumentException) {
+                return null
+            }
+            // Ein Link im Link ergibt keinen Sinn und soll auch keine Schleife auslösen.
+            return if (findLink(value) != null) null else parseTarget(value, allowHttp)
+        }
+        val parts = rest.substringBefore('?').trim('/').split('/')
+        val topic = when {
+            parts.size == 2 && parts[0].equals("abo", ignoreCase = true) -> parts[1]
+            parts.size == 1 && !parts[0].equals("abo", ignoreCase = true) -> parts[0]
+            else -> return null
+        }
+        return if (TOPIC.matches(topic)) Target(DEFAULT_SERVER, topic) else null
+    }
+
+    /** Das Ziel so, wie man es ins Feld "Thema" schreibt: der Name, bei einem eigenen Server die Adresse. */
+    fun plain(target: Target): String =
+        if (target.server == DEFAULT_SERVER) target.topic else "${target.server}/${target.topic}"
+
+    /** Link, der auf einem weiteren Handy dasselbe Thema einrichtet. */
+    fun link(target: Target): String =
+        if (target.server == DEFAULT_SERVER) "$LINK_PREFIX/${target.topic}"
+        else "$LINK_PREFIX?thema=" + URLEncoder.encode(plain(target), "UTF-8")
+
+    /**
+     * Nachricht zum Weitergeben an ein weiteres Handy. Wer sie dort kopiert und in der App
+     * auf "Einfügen" tippt, ist eingerichtet: [parseTarget] findet den Link im Text.
+     */
+    fun shareText(target: Target, downloadUrl: String): String =
+        "Blackout-Radar: Alarm aufs Handy bei einem großen Stromausfall.\n\n" +
+            "1. App herunterladen und installieren:\n$downloadUrl\n\n" +
+            "2. Diese ganze Nachricht kopieren, die App öffnen und auf „Einfügen“ tippen.\n\n" +
+            link(target)
 
     /** Dauerverbindung: liefert zuerst alles seit [since], danach jede neue Meldung sofort. */
     fun streamUrl(target: Target, since: String): String = "${target.server}/${target.topic}/json?since=$since"

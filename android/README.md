@@ -13,17 +13,25 @@ Statt das Thema einzutippen, geht auch ein Link der Form `blackoutradar://abo/<t
 
 Android warnt beim Installieren, weil die App nicht aus dem Play Store kommt. Das ist bei jeder App so, die man selbst herunterlädt.
 
+### Weitere Handys
+
+Die App läuft auf beliebig vielen Handys, alle bekommen dieselben Meldungen. Am eingerichteten Handy: **App → Weitere Handys → App und Thema weitergeben** und die Nachricht per Messenger oder E-Mail schicken. Sie enthält den Download und das Thema. Am anderen Handy die App installieren, die ganze Nachricht kopieren und in der App auf **Einfügen** tippen.
+
+Das Thema wirkt wie ein Passwort: Wer es kennt, kann mitlesen und selbst Meldungen an alle schicken. Deshalb nur an Leute weitergeben, denen man vertraut.
+
 ## Was die App kann
 
 | Teil | Inhalt |
 |---|---|
 | **Lage** | Lagebericht des Radars: laufende und beendete Ereignisse, Kennzahlen, Statistik, Datenquellen. Der letzte Stand bleibt auch ohne Netz lesbar. |
 | **Meldungen** | alle empfangenen Meldungen, nach Tagen geordnet |
-| **App** | Zustand der Verbindung, Prüfliste der Erlaubnisse, Einstellungen, Probealarm, neue Version |
+| **App** | Zustand der Verbindung, Prüfliste der Erlaubnisse, Einstellungen, Probealarm, Weitergabe an weitere Handys, neue Version |
 
 **Alarm:** Ein Alarm (großer Stromausfall in Österreich, schwere Störung der Netzfrequenz) läutet über die Wecker-Lautstärke, also auch bei Lautlos und bei "Nicht stören", solange dort Wecker erlaubt sind (Standard). Auf Wunsch wiederholt sich der Ton, bis man die Meldung öffnet. Warnungen und Meldungen kommen mit dem normalen Benachrichtigungston, die tägliche Übersicht leise. In den Android-Einstellungen der App lässt sich jeder dieser Kanäle einzeln anpassen.
 
 **Wächter:** Etwa alle 15 Minuten prüft die App, ob ihre Verbindung lebt, und baut sie sonst neu auf. Nach einem Funkloch, einem Neustart des Handys oder wenn Android die App beendet hat, holt sie nach, was in der Zwischenzeit gekommen ist. Zugleich schaut sie, ob der Radar selbst noch läuft: Ist der Lagebericht älter als 3 Stunden, kommt ein Hinweis, weil dann auch keine Alarme kämen.
+
+**Uhrzeiten:** Die App zeigt alle Zeiten in österreichischer Zeit, so wie der Radar sie in seinen Meldungen schreibt, auch wenn das Handy auf eine andere Zeitzone gestellt ist.
 
 **Neue Versionen:** Die App fragt zweimal am Tag bei GitHub nach. Gibt es eine neue Version, steht im Tab **App** ein Knopf zum Herunterladen. Thema und Einstellungen bleiben beim Aktualisieren erhalten.
 

@@ -17,6 +17,7 @@ import java.net.UnknownHostException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLException
@@ -259,7 +260,10 @@ class ListenerService : Service() {
         Alerts.updateService(this, text)
     }
 
-    private fun clock(ms: Long): String = SimpleDateFormat("HH:mm", Locale.GERMANY).format(Date(ms))
+    /** Uhrzeit in österreichischer Zeit, so wie überall in der App und in den Texten des Radars. */
+    private fun clock(ms: Long): String = SimpleDateFormat("HH:mm", Locale.GERMANY)
+        .apply { timeZone = TimeZone.getTimeZone("Europe/Vienna") }
+        .format(Date(ms))
 
     private fun kickInternal(force: Boolean) {
         if (force) closeConnection()

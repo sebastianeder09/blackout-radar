@@ -129,12 +129,8 @@ class MainActivity : Activity() {
     /** Liest das Thema aus einem Link wie blackoutradar://abo/thema oder blackoutradar://abo?thema=thema. */
     private fun linkTarget(intent: Intent?): Target? {
         val data = intent?.data ?: return null
-        if (intent.action != Intent.ACTION_VIEW || data.scheme != "blackoutradar") return null
-        val text = data.getQueryParameter("thema")
-            ?: data.lastPathSegment
-            ?: data.host?.takeIf { it != "abo" }
-            ?: return null
-        return Ntfy.parseTarget(text)
+        if (intent.action != Intent.ACTION_VIEW) return null
+        return Ntfy.parseLink(data.toString())
     }
 
     /**
@@ -373,7 +369,9 @@ class MainActivity : Activity() {
                     null
                 }
                 val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).coerceToText(this@MainActivity).toString() else ""
-                js("window.BR&&BR.onPaste(${quote(text.take(500))})")
+                // Aus einer weitergegebenen Nachricht zählt nur der Link der App, der Rest ist Anleitung.
+                val shared = Ntfy.findLink(text)?.let { Ntfy.parseLink(it, BuildConfig.DEBUG) }
+                js("window.BR&&BR.onPaste(${quote(shared?.let { Ntfy.plain(it) } ?: text.take(500))})")
             }
         }
 
@@ -395,6 +393,22 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun resetTopic() {
             Sync.reset(applicationContext)
+        }
+
+        /** Öffnet die Auswahl von Android (Messenger, E-Mail …) mit Download und Thema für ein weiteres Handy. */
+        @JavascriptInterface
+        fun share() {
+            val target = store.target ?: return
+            val send = Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_TEXT, Ntfy.shareText(target, Updates.DOWNLOAD_URL))
+            runOnUiThread {
+                try {
+                    startActivity(Intent.createChooser(send, "Weitergeben"))
+                } catch (e: ActivityNotFoundException) {
+                    // Dieses Gerät hat keine App, die Text annimmt.
+                }
+            }
         }
 
         @JavascriptInterface

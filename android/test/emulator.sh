@@ -71,6 +71,13 @@ layout() {  # Paket Name: Kopfzeile oben, Leiste unten, nichts ragt seitlich hin
   [[ "$verdict" == ok* ]]
 }
 
+painted() {  # Paket: wartet auf das nächste ganze Bild der Seite (bild.js) und meldet, ob eines kam
+  local answer
+  answer=$(page "$1" "$(cat "$HERE/bild.js")")
+  log "Zeichnen $1: ${answer:-nicht lesbar}, $(adb shell dumpsys gfxinfo "$1" | grep -m1 'Total frames rendered' | tr -d '\r')"
+  [[ "$answer" == Bild* ]]
+}
+
 service_running() { adb shell dumpsys activity services "$1/.ListenerService" 2> /dev/null | grep -q "ServiceRecord"; }
 
 wait_boot() {
@@ -111,11 +118,15 @@ adb shell am start -n "$DBG/$PKG.MainActivity" --es tab lage > /dev/null
 page_has "$DBG" "Laufender Stromausfall" && ok "Testbau: Lagebericht mit laufendem Blackout angezeigt" || bad "Testbau: Lagebericht fehlt"
 shot 10-blackout-lage
 layout "$DBG" "Testbau" && ok "Testbau: Kopfzeile und Leiste sitzen richtig" || bad "Testbau: Aufbau der Seite stimmt nicht"
+adb shell am start -n "$DBG/$PKG.MainActivity" --es tab meldungen > /dev/null
+page_has "$DBG" "Die App behält die letzten 300 Meldungen" && ok "Testbau: Liste der Meldungen angezeigt" || bad "Testbau: Liste der Meldungen fehlt"
+shot 11-blackout-meldungen
+# Eine Meldung kommt, während die Liste offen ist und niemand das Handy berührt.
 curl -sS -H "Title: Testbau live" -H "Priority: 4" -H "Tags: warning" -d "Zustellung im Testbau" http://127.0.0.1:8765/testthema > /dev/null
 if t=$(wait_notification "Testbau live" 40); then ok "Testbau: neue Meldung nach $t s als Benachrichtigung"; else bad "Testbau: neue Meldung nicht als Benachrichtigung"; fi
-adb shell am start -n "$DBG/$PKG.MainActivity" --es tab meldungen > /dev/null
-page_has "$DBG" "Testbau live" && ok "Testbau: neue Meldung steht in der Liste" || bad "Testbau: neue Meldung fehlt in der Liste"
-shot 11-blackout-meldungen
+page_has "$DBG" "Testbau live" && ok "Testbau: neue Meldung steht in der offenen Liste" || bad "Testbau: neue Meldung fehlt in der offenen Liste"
+painted "$DBG" && ok "Testbau: Anzeige wird ohne Berührung neu gezeichnet" || bad "Testbau: Anzeige wird nicht neu gezeichnet"
+shot 14-blackout-neue-meldung 7  # erst wenn der Hinweis von Android am oberen Rand wieder weg ist
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
 page_has "$DBG" "Meldungen kommen sofort an" && ok "Testbau: Verbindung wird als bestehend angezeigt" || bad "Testbau: Anzeige der Verbindung stimmt nicht"
 shot 12-blackout-app
@@ -135,9 +146,11 @@ adb shell am start -W -a android.intent.action.VIEW -d "blackoutradar://abo/$TOP
 page_has "$PKG" "Meldung der letzten 12 Stunden" && ok "Einrichten per Link: Thema übernommen, vorhandene Meldung gefunden" \
   || bad "Einrichten per Link: Ergebnis nicht wie erwartet"
 shot 01-eingerichtet
+log "Vor dem Knopf: $(adb shell dumpsys gfxinfo "$PKG" | grep -m1 'Total frames rendered' | tr -d '\r')"
 page "$PKG" "document.querySelector('.result .btn.primary').click()" > /dev/null  # Knopf "Weiter"
 page_has "$PKG" "Lagebericht des Blackout-Radars" && ok "Lagebericht des echten Radars geladen und angezeigt" \
   || bad "Lagebericht des echten Radars fehlt"
+painted "$PKG" && ok "Anzeige wird ohne Berührung neu gezeichnet" || bad "Anzeige wird nicht neu gezeichnet"
 shot 02-lage
 layout "$PKG" "fertige App" && ok "Kopfzeile und Leiste sitzen richtig" || bad "Aufbau der Seite stimmt nicht"
 
@@ -221,8 +234,15 @@ shot 04-meldungen
 adb shell am start -n "$PKG/.MainActivity" --es tab app > /dev/null
 page_has "$PKG" "Meldungen kommen sofort an" && ok "Verbindung wird als bestehend angezeigt" || bad "Anzeige der Verbindung stimmt nicht"
 shot 05-app
+# Weitergeben an ein weiteres Handy: Android zeigt seine Auswahl mit der fertigen Nachricht.
+page "$PKG" "Native.share()" > /dev/null
+sleep 3
+adb shell dumpsys activity activities 2> /dev/null | grep -q "ChooserActivity" \
+  && ok "Weitergeben öffnet die Auswahl von Android" || bad "Weitergeben öffnet die Auswahl von Android nicht"
+shot 06-weitergeben
+adb shell input keyevent KEYCODE_BACK
 adb shell am start -n "$PKG/.MainActivity" --es tab lage > /dev/null
-shot 06-lage 3
+shot 07-lage 3
 
 adb logcat -d > "$OUT/logcat.txt" 2>&1
 adb shell dumpsys notification --noredact > "$OUT/benachrichtigungen.txt" 2>&1

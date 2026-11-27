@@ -43,6 +43,19 @@ class RulesTest {
     }
 
     @Test
+    fun vorgeschichteNachEinrichtenOhneNetz() {
+        fun notice(id: String, time: Long) = Notice(id, time, "Titel $id", "Text", 5, emptyList(), "")
+        val setup = 1_000_000L
+        val all = listOf(notice("alt", setup - 3_600), notice("knapp", setup - 1), notice("gleich", setup), notice("neu", setup + 5))
+        // Still in die Liste kommt nur, was vor dem Einrichten kam. Alles ab dann läutet über die Verbindung.
+        assertEquals(listOf("alt", "knapp"), History.before(all, setup).map { it.id })
+        assertTrue(History.before(emptyList(), setup).isEmpty())
+        // ntfy.sh bewahrt Meldungen 12 Stunden auf. Danach gibt es nichts mehr nachzuholen.
+        assertFalse(History.expired(setup + 11 * 3_600, setup))
+        assertTrue(History.expired(setup + 13 * 3_600, setup))
+    }
+
+    @Test
     fun nummerDerVeroeffentlichung() {
         assertEquals(12, Updates.parseBuild("app-v12"))
         assertEquals(7, Updates.parseBuild(" app-v7 "))

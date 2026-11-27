@@ -807,7 +807,8 @@
     if (r.offline) {
       kind = 'info';
       title = 'Gespeichert';
-      text = 'ntfy.sh war gerade nicht erreichbar. Die App verbindet sich von selbst, sobald das Netz da ist.';
+      text = 'ntfy.sh war gerade nicht erreichbar. Die App verbindet sich von selbst, sobald das Netz da ist, ' +
+        'und holt dann die Meldungen der letzten 12 Stunden nach.';
     } else if (r.count > 0) {
       const newest = S.msgs[0];
       kind = 'ok';

@@ -81,14 +81,18 @@ object Watchdog {
         val store = Store.get(app)
         if (store.target == null) return
         arm(app)
+        val timeoutMs = if (quick) 5_000 else 15_000
+        var reachable = false
         if (!ListenerService.running) {
-            if (!ListenerService.start(app)) Sync.catchUp(app, if (quick) 5_000 else 15_000)
+            if (!ListenerService.start(app)) reachable = Sync.catchUp(app, timeoutMs) >= 0
         } else if (AppState.conn == AppState.Conn.CONNECTED) {
             val silence = SystemClock.elapsedRealtime() - AppState.lastActivityElapsed
-            if (silence > ListenerService.STALE_AFTER_MS) ListenerService.kick(force = true)
+            if (silence > ListenerService.STALE_AFTER_MS) ListenerService.kick(force = true) else reachable = true
         } else {
             ListenerService.kick(force = false)
         }
+        // Fehlt noch, was vor dem Einrichten kam, und der Server antwortet gerade: jetzt nachholen.
+        if (reachable && store.historyPending) Sync.backfill(app, timeoutMs)
         if (!quick) checkMonitor(app, store)
     }
 

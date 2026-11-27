@@ -4,7 +4,8 @@
 # Fertige App (release) gegen das echte ntfy.sh, auf einem Zufallsthema nur für diesen Lauf:
 # Einrichten per Link, Lagebericht des echten Radars, Zustellung eines Alarms, Funkloch,
 # Ruhezustand (Doze), abgestürzter Dienst und Neustart des Handys. Testbau (debug) gegen einen
-# nachgestellten Server (android/test/fake_ntfy.py auf Port 8765): Anzeige bei einem Blackout.
+# nachgestellten Server (android/test/fake_ntfy.py auf Port 8765): Anzeige bei einem Blackout und
+# Einrichten ohne Netz.
 #
 # Was die App anzeigt, liest seite.py aus der Seite selbst. Ob das Bild am Handy einer Änderung
 # auch folgt, zeigt der Vergleich zweier Bildschirmfotos (Vorschau.java). Am Ende steht die Frage,
@@ -77,6 +78,24 @@ page_has() {  # Paket Text: steht der Text gerade in der Seite der App?
   return 1
 }
 
+wait_page() {  # Paket Text Sekunden -> gibt die Wartezeit in Sekunden aus, sobald der Text in der Seite steht
+  local start text
+  start=$(date +%s)
+  while [ $(($(date +%s) - start)) -lt "$3" ]; do
+    if text=$(page "$1") && grep -qF -- "$2" <<< "$text"; then
+      echo $(($(date +%s) - start))
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+setup_debug() {  # richtet den Testbau am nachgestellten Server ein -> Antwort der App, siehe DebugReceiver
+  adb shell am broadcast -n "$DBG/$PKG.DebugReceiver" --es ziel http://10.0.2.2:8765/testthema --es status http://10.0.2.2:8765 \
+    2> /dev/null | tr -d '\r' | sed -n 's/.*data="\(.*\)".*/\1/p'
+}
+
 layout() {  # Paket Name: Kopfzeile oben, Leiste unten, nichts ragt seitlich hinaus (aufbau.js)
   local verdict
   verdict=$(page "$1" "$(cat "$HERE/aufbau.js")")
@@ -97,14 +116,17 @@ changed() {  # Bild1 Bild2 Von Bis: hat sich das Bild zwischen den beiden Höhen
 #    deshalb fragt der Test sie vor dem Neustart und am Schluss ab.
 # 2. Die Fehlerberichte (dropbox) mit dem Wortlaut des Fehlers. Sie bleiben über Neustarts erhalten.
 exits() {  # Paket: eine Zeile je Prozessende, z. B. "reason=2 (SIGNALED) subreason=0 (UNKNOWN) status=9"
-  adb shell dumpsys activity exit-info "$1" 2> /dev/null | tr -d '\r' | grep -o 'reason=[0-9].*'
+  # Android 12 schreibt jede Angabe in eine eigene Zeile. "subreason=" zählt dort nicht als Grund.
+  adb shell dumpsys activity exit-info "$1" 2> /dev/null | tr -d '\r' | grep -oE '(^|[[:space:]])reason=[0-9].*' | sed 's/^[[:space:]]*//'
 }
 
 note_exits() {  # Datei: Prozessenden der fertigen App und des Testbaus bis jetzt festhalten
   { exits "$PKG" | sed 's/^/fertige App: /'; exits "$DBG" | sed 's/^/Testbau: /'; } > "$OUT/$1"
 }
 
-BAD_EXIT='reason=(4|5|6|7) '  # Absturz (Java), Absturz (nativ), Hänger, Start misslungen
+# Absturz (Java), Absturz (nativ), Hänger, Start misslungen. Am Zeilenanfang oder nach dem Namen der App,
+# damit ein harmloser Untergrund wie "subreason=4 (TRIM EMPTY)" nicht als Absturz zählt.
+BAD_EXIT='(^|: )reason=(4|5|6|7) '
 
 reports() {  # Paket Datei: Fehlerberichte von Android zu Abstürzen und Hängern dieses Pakets
   local tag
@@ -148,7 +170,18 @@ log "Bildschirm: $(adb shell wm size | tr -d '\r' | tr '\n' ' ')$(adb shell wm d
 adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
 page_has "$DBG" "Alarme auf dieses Handy holen" && ok "Testbau: Einrichten wird angezeigt" || bad "Testbau: Einrichten fehlt"
 shot 00-einrichten
-adb shell am broadcast -n "$DBG/$PKG.DebugReceiver" --es ziel http://10.0.2.2:8765/testthema --es status http://10.0.2.2:8765 > /dev/null
+# Kurz nach dem Start hat der Emulator manchmal noch kein Netz. Die Anzeige bei einem Blackout braucht den
+# nachgestellten Server, deshalb richtet der Test ein, bis der Server geantwortet hat, und vermerkt jede Antwort.
+# Was die App tut, wenn beim Einrichten kein Netz da ist, prüft weiter unten ein eigener Schritt.
+answer=""
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  answer=$(setup_debug)
+  log "Testbau einrichten, Versuch $attempt: ${answer:-keine Antwort}"
+  [[ "$answer" == *"ohne-netz=false, lagebericht=true"* ]] && break
+  sleep 3
+done
+[[ "$answer" == *"ohne-netz=false, lagebericht=true"* ]] && ok "Testbau: am nachgestellten Server eingerichtet" \
+  || bad "Testbau: nachgestellter Server aus dem Emulator nicht erreichbar"
 sleep 4
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab lage > /dev/null
 page_has "$DBG" "Laufender Stromausfall" && ok "Testbau: Lagebericht mit laufendem Blackout angezeigt" || bad "Testbau: Lagebericht fehlt"
@@ -286,6 +319,29 @@ snap 06-weitergeben
 adb shell input keyevent KEYCODE_BACK
 adb shell am start -n "$PKG/.MainActivity" --es tab lage > /dev/null
 shot 07-lage 3
+
+# ------------------------------------------------- Testbau: Einrichten ohne Netz
+# Die App merkt sich das Thema, verbindet sich, sobald das Netz da ist, und holt dann nach, was der Server von
+# vorher noch hat. Diese älteren Meldungen kommen still in die Liste, sie läuten nicht. Der Schritt steht am
+# Schluss, damit das Ab- und Einschalten des Netzes keine andere Prüfung stört.
+old_title=$(curl -sS "http://127.0.0.1:8765/testthema/json?poll=1&since=all" | python3 -c 'import json, sys; print(json.loads(sys.stdin.readline())["title"].split(":")[0])')
+adb shell am start -W -n "$DBG/$PKG.MainActivity" --es tab meldungen > /dev/null
+adb shell svc wifi disable
+adb shell svc data disable
+sleep 8
+answer=$(setup_debug)
+log "Testbau ohne Netz einrichten: ${answer:-keine Antwort}"
+[[ "$answer" == *"ok=true"*"ohne-netz=true"* ]] && ok "Testbau: Einrichten ohne Netz wird gespeichert" || bad "Testbau: Einrichten ohne Netz nicht wie erwartet"
+page_has "$DBG" "Noch keine Meldungen" && ok "Testbau: Liste ohne Netz zunächst leer" || bad "Testbau: Liste nach dem Einrichten ohne Netz nicht leer"
+adb shell svc wifi enable
+adb shell svc data enable
+if [ -n "$old_title" ] && t=$(wait_page "$DBG" "$old_title" 150); then
+  ok "Testbau: ältere Meldungen nachgeholt, $t s nach Rückkehr des Netzes"
+else
+  bad "Testbau: ältere Meldungen nach dem Einrichten ohne Netz nicht nachgeholt (gesucht: \"$old_title\")"
+fi
+has_notification "$old_title" && bad "Testbau: nachgeholte ältere Meldung hat geläutet" || ok "Testbau: nachgeholte ältere Meldungen bleiben still"
+shot 15-nachgeholt
 
 adb logcat -d > "$OUT/logcat.txt" 2>&1
 adb shell dumpsys notification --noredact > "$OUT/benachrichtigungen.txt" 2>&1

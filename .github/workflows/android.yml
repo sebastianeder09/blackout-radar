@@ -124,10 +124,17 @@ jobs:
           retention-days: 14
 
       # Für Prüfungen, die nur die Protokolle lesen können: Vorschau.java holt die Bilder wieder heraus.
+      # Bei Pull Requests immer, sonst nur, wenn der Test fehlgeschlagen ist.
       - name: Bilder verkleinert ins Protokoll
-        if: always() && github.event_name == 'pull_request'
+        if: always() && (github.event_name == 'pull_request' || failure())
         continue-on-error: true
         run: java -Djava.awt.headless=true android/test/Vorschau.java schreiben ergebnis 405
+
+      # Zeigt, welche Anfragen der App beim nachgestellten Server angekommen sind.
+      - name: Protokoll des nachgestellten Servers
+        if: failure()
+        continue-on-error: true
+        run: tail -n 200 "$RUNNER_TEMP/fake_ntfy.log"
 
   release:
     name: Veröffentlichen

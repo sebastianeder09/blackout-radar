@@ -35,6 +35,8 @@ object Sync {
             store.sinceTime = nowSeconds
             notices?.forEach { store.log.add(it) }
             store.lastId = store.log.newestId()
+            // Ohne Antwort des Servers fehlt, was er von vorher noch hat. Das holt backfill nach.
+            store.historyPending = notices == null
         }
         AppState.messagesChanged()
         Starter.ensure(context)
@@ -48,6 +50,7 @@ object Sync {
         synchronized(setupLock) {
             store.target = null
             store.lastId = null
+            store.historyPending = false
             store.log.clear()
         }
         ListenerService.stop(context)
@@ -73,6 +76,37 @@ object Sync {
         return fresh
     }
 
+    /**
+     * Holt nach, was der Server von vor dem Einrichten noch hat, falls er beim Einrichten nicht
+     * erreichbar war. Diese Meldungen kommen still in die Liste: Sie waren schon alt, als das Handy
+     * dazukam. Alles ab dem Einrichten liefert die Verbindung selbst, und das läutet.
+     * Liefert false, wenn der Server noch immer nicht antwortet. Läuft nie auf dem Hauptfaden.
+     */
+    fun backfill(context: Context, timeoutMs: Int): Boolean {
+        val store = Store.get(context)
+        if (!store.historyPending) return true
+        val target = store.target ?: return true
+        val setupTime = store.sinceTime
+        if (History.expired(System.currentTimeMillis() / 1000L, setupTime)) {
+            store.historyPending = false
+            return true
+        }
+        val notices = try {
+            poll(target, "all", timeoutMs)
+        } catch (e: IOException) {
+            return false
+        }
+        var added = 0
+        synchronized(setupLock) {
+            // Wurde inzwischen neu eingerichtet oder zurückgesetzt, gehört die Antwort nicht mehr hierher.
+            if (!store.historyPending || store.target != target || store.sinceTime != setupTime) return true
+            for (notice in History.before(notices, setupTime)) if (store.log.add(notice)) added++
+            store.historyPending = false
+        }
+        if (added > 0) AppState.messagesChanged()
+        return true
+    }
+
     /** Nimmt eine Meldung auf und zeigt sie an, falls sie neu ist. */
     fun deliver(context: Context, notice: Notice): Boolean {
         val store = Store.get(context)
@@ -94,4 +128,18 @@ object Sync {
         }
         return notices
     }
+}
+
+/** Was beim Nachholen als Vorgeschichte gilt, also als Meldung von vor dem Einrichten. */
+object History {
+    /** So lange bewahrt ntfy.sh Meldungen auf. Danach gibt es nichts mehr nachzuholen. */
+    const val KEPT_SECONDS = 12 * 60 * 60L
+
+    /**
+     * Die Meldungen von vor dem Einrichten. Was in derselben Sekunde oder später kam, bleibt der
+     * Verbindung überlassen, damit ein Alarm nie still in der Liste landet.
+     */
+    fun before(notices: List<Notice>, setupSeconds: Long): List<Notice> = notices.filter { it.time < setupSeconds }
+
+    fun expired(nowSeconds: Long, setupSeconds: Long): Boolean = nowSeconds - setupSeconds > KEPT_SECONDS
 }

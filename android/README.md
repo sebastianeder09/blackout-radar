@@ -31,6 +31,8 @@ Das Thema wirkt wie ein Passwort: Wer es kennt, kann mitlesen und selbst Meldung
 
 **Wächter:** Etwa alle 15 Minuten prüft die App, ob ihre Verbindung lebt, und baut sie sonst neu auf. Nach einem Funkloch, einem Neustart des Handys oder wenn Android die App beendet hat, holt sie nach, was in der Zwischenzeit gekommen ist. Zugleich schaut sie, ob der Radar selbst noch läuft: Ist der Lagebericht älter als 3 Stunden, kommt ein Hinweis, weil dann auch keine Alarme kämen.
 
+**Einrichten ohne Netz:** Ist ntfy.sh beim Einrichten nicht erreichbar, merkt sich die App das Thema und verbindet sich, sobald das Netz da ist. Die Meldungen der letzten 12 Stunden holt sie dann nach. Sie kommen still in die Liste, weil sie schon älter sind. Alles, was ab dem Einrichten kommt, läutet wie gewohnt.
+
 **Uhrzeiten:** Die App zeigt alle Zeiten in österreichischer Zeit, so wie der Radar sie in seinen Meldungen schreibt, auch wenn das Handy auf eine andere Zeitzone gestellt ist.
 
 **Neue Versionen:** Die App fragt zweimal am Tag bei GitHub nach. Gibt es eine neue Version, steht im Tab **App** ein Knopf zum Herunterladen. Thema und Einstellungen bleiben beim Aktualisieren erhalten.
@@ -48,19 +50,19 @@ Das Thema wirkt wie ein Passwort: Wer es kennt, kann mitlesen und selbst Meldung
 |---|---|
 | `app/src/main/java/…/ListenerService.kt` | Dauerverbindung zu ntfy (`/<thema>/json`), Wiederaufbau mit wachsenden Wartezeiten |
 | `app/src/main/java/…/Watchdog.kt` | Wächter über Wecker und JobScheduler, Start nach dem Einschalten |
-| `app/src/main/java/…/Sync.kt` | Einrichten und Nachholen verpasster Meldungen (`poll=1`, `since=<letzte Meldung>`) |
+| `app/src/main/java/…/Sync.kt` | Einrichten und Nachholen verpasster Meldungen (`poll=1`, `since=<letzte Meldung>`), dazu die Vorgeschichte nach einem Einrichten ohne Netz |
 | `app/src/main/java/…/Alerts.kt` | Benachrichtigungskanäle und Anzeige |
 | `app/src/main/assets/www/` | Oberfläche (HTML, CSS, JavaScript in einer WebView, lädt nichts aus dem Netz) |
-| `app/src/debug/` | nur im Testbau: Einrichten per `adb`, unverschlüsselte Verbindung zum nachgestellten Server, absichtlicher Absturz für die Gegenprobe im Emulator-Test |
+| `app/src/debug/` | nur im Testbau: Einrichten per `adb` mit Rückmeldung, wie es ausging, unverschlüsselte Verbindung zum nachgestellten Server, absichtlicher Absturz für die Gegenprobe im Emulator-Test |
 | `test/emulator.sh` | Emulator-Test: fertige App gegen ntfy.sh, Testbau gegen den nachgestellten Server `fake_ntfy.py` mit Testdaten aus dem Planspiel (`fixtures.py`) |
 | `test/seite.py` | liest im Emulator, was die App gerade anzeigt, und kann Knöpfe drücken (über die Entwickler-Schnittstelle der WebView) |
 | `test/Vorschau.java` | schreibt die Bildschirmfotos verkleinert ins Protokoll, holt sie dort wieder heraus und vergleicht zwei Bilder |
 
 Bauen: `cd android && gradle assembleRelease` (Gradle 8.14, JDK 17, Android SDK 35). Tests: `gradle testDebugUnitTest`.
 
-Bei jeder Änderung unter `android/` baut GitHub Actions die App (`.github/workflows/android.yml`), führt die Tests aus und prüft sie in zwei Emulatoren (Android 12 und 15) gegen das echte ntfy.sh: Einrichten per Link, Lagebericht, Alarm, Funkloch, Ruhezustand, hart beendete App, Neustart und Weitergeben. Zwei Bildvergleiche zeigen, dass die Anzeige einer Änderung von selbst folgt. Am Ende fragt der Lauf Android, ob die App abgestürzt oder hängen geblieben ist, und prüft mit einem absichtlichen Absturz des Testbaus, dass diese Frage auch anschlägt. Nach dem Zusammenführen in `main` erscheint die neue Fassung unter *Releases*.
+Bei jeder Änderung unter `android/` baut GitHub Actions die App (`.github/workflows/android.yml`), führt die Tests aus und prüft sie in zwei Emulatoren (Android 12 und 15) gegen das echte ntfy.sh: Einrichten per Link, Lagebericht, Alarm, Funkloch, Ruhezustand, hart beendete App, Neustart und Weitergeben. Der Testbau zeigt dazu einen nachgestellten Blackout und wird einmal ohne Netz eingerichtet: Die älteren Meldungen müssen danach still in der Liste stehen. Zwei Bildvergleiche zeigen, dass die Anzeige einer Änderung von selbst folgt. Am Ende fragt der Lauf Android, ob die App abgestürzt oder hängen geblieben ist, und prüft mit einem absichtlichen Absturz des Testbaus, dass diese Frage auch anschlägt. Nach dem Zusammenführen in `main` erscheint die neue Fassung unter *Releases*.
 
-Die Bildschirmfotos des Emulators liegen in voller Größe als Artefakt `emulator-api-<Nummer>` beim Lauf. In Pull Requests stehen sie zusätzlich verkleinert im Protokoll (Schritt "Bilder verkleinert ins Protokoll"). So holt man sie heraus:
+Die Bildschirmfotos des Emulators liegen in voller Größe als Artefakt `emulator-api-<Nummer>` beim Lauf. In Pull Requests stehen sie zusätzlich verkleinert im Protokoll (Schritt "Bilder verkleinert ins Protokoll"), bei einem fehlgeschlagenen Lauf auch sonst. Dann zeigt der Schritt "Protokoll des nachgestellten Servers" außerdem, welche Anfragen der App dort angekommen sind. So holt man die Bilder heraus:
 
 ```sh
 gh api repos/sebastianeder09/blackout-radar/actions/jobs/<Nummer des Jobs>/logs > protokoll.txt

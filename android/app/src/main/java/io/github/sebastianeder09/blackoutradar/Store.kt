@@ -34,6 +34,14 @@ class Store private constructor(context: Context) {
         get() = prefs.getLong("sinceTime", 0L)
         set(value) = prefs.edit().putLong("sinceTime", value).apply()
 
+    /**
+     * Beim Einrichten war der Server nicht erreichbar: Was er von davor noch hat, fehlt in der Liste
+     * und wird nachgeholt, sobald die Verbindung steht.
+     */
+    var historyPending: Boolean
+        get() = prefs.getBoolean("historyPending", false)
+        set(value) = prefs.edit().putBoolean("historyPending", value).apply()
+
     /** Alarm über die Wecker-Lautstärke, damit er auch bei "Lautlos" und "Nicht stören" läutet. */
     var loudAlarm: Boolean
         get() = prefs.getBoolean("loudAlarm", true)

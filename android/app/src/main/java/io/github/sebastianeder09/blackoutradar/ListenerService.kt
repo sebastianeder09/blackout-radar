@@ -205,6 +205,7 @@ class ListenerService : Service() {
             AppState.setConn(AppState.Conn.CONNECTED)
             updateLabel()
             releaseWake()
+            if (store.historyPending) backfillAside()
             conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                 while (!stopped) {
                     val line = reader.readLine() ?: break
@@ -234,6 +235,21 @@ class ListenerService : Service() {
             }
             releaseWake()
         }
+    }
+
+    /**
+     * Beim Einrichten war der Server nicht erreichbar. Jetzt antwortet er, also die älteren Meldungen
+     * nachholen. Auf einem eigenen Faden, damit die Verbindung inzwischen schon zuhört.
+     */
+    private fun backfillAside() {
+        val app = applicationContext
+        Thread({
+            try {
+                Sync.backfill(app, 15_000)
+            } catch (e: RuntimeException) {
+                // Der Wächter und der nächste Verbindungsaufbau versuchen es wieder.
+            }
+        }, "ntfy-vorgeschichte").start()
     }
 
     private fun describe(e: IOException): String = when (e) {

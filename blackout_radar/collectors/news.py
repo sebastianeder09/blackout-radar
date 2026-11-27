@@ -175,44 +175,121 @@ BIG_WORDS = re.compile(
 _HOUSEHOLDS = (r"haushalte|households|homes|customers|kunden|anlagen|clientes|usuarios|hogares|abonnés|"
                r"foyers|utenti|famiglie")
 _PERSONS = r"menschen|people|personen|einwohner|residents|personas|habitantes|pessoas|personnes|persone"
-_MONEY = r"(?!\s*(?:de\s+)?(?:euros?|dollars?|dólares|usd|eur|€|\$|pesos|reais|pounds?|franken))"
-_MILLION = re.compile(
-    rf"(\d+(?:[.,]\d+)?)\s*(?:million|millionen|mio\.?|millones|millón|milhões|milhão|millions|milioni|milione)"
-    rf"\b{_MONEY}"
-    rf"(?:\s+(?:de\s+|d')?({_HOUSEHOLDS}))?", re.IGNORECASE)
-_COUNT = re.compile(rf"(\d{{1,3}}(?:[.,\s]\d{{3}})+|\d{{4,7}})\s*({_HOUSEHOLDS}|{_PERSONS})", re.IGNORECASE)
 _HOUSEHOLD_WORD = re.compile(_HOUSEHOLDS, re.IGNORECASE)
+# Eine Zahl zählt nur dann als Betroffene, wenn die Schlagzeile das an dieser Stelle sagt: mit einem Wort für
+# die Betroffenen ("3 Millionen Menschen", "20.000 Haushalte"), mit ihrem Zustand ("Millionen ohne Strom",
+# "20.000 von Stromausfall in Linz betroffen") oder mit dem Verb davor ("trifft 2 Millionen", "deja sin luz a
+# millones"). Sonst zählt sie oft etwas anderes: "Schaden geht in die Millionen", "investiert 100 Millionen
+# in das Netz" und "100 millones reforzará la red" (so am 27.11.2026 in einer Schlagzeile aus Spanien).
+_WHO = rf"(?:{_HOUSEHOLDS}|{_PERSONS})"
+_STATE = (r"(?:ohne strom|ohne elektrizität|stromlos|im dunkeln|im finstern|betroffen|"
+          r"without (?:power|electricity)|in(?:to)? (?:the )?dark(?:ness)?|(?:lose|loses|lost|losing) power|"
+          r"blacked out|affected|impacted|"
+          r"sin (?:luz|electricidad|energ[ií]a|servicio|suministro)|a oscuras|afectad[oa]s|"
+          r"sem (?:luz|energia|eletricidade)|às escuras|no escuro|afetad[oa]s|"
+          r"sans (?:électricité|courant)|dans le noir|privée?s d.électricité|"
+          r"senza (?:corrente|elettricità|luce)|al buio)")
+_ABOUT = (r"(?:rund|etwa|fast|knapp|über|mehr als|bis zu|mindestens|circa|ca\.?|about|nearly|almost|over|"
+          r"more than|up to|at least|around|some|roughly|más de|casi|cerca de|unos|unas|al menos|mais de|quase|"
+          r"pelo menos|plus de|près de|environ|oltre|quasi)")
+# Direkt nach der Zahl
+_DIRECT = re.compile(rf"\s*(?:(?:de|of|von|di)\s+|d['’])?(?P<who>{_WHO})|\s+{_STATE}", re.IGNORECASE)
+# Später im selben Satzteil: "Millionen Österreicher ohne Strom", "millions of East Coast residents"
+_LATER = re.compile(rf"(?:\s+\S+){{1,5}}?\s+(?:{_WHO}|{_STATE})", re.IGNORECASE)
+# ... aber nicht als Empfänger oder Zweck einer Summe: "2 Millionen an Kunden ohne Strom", "100 Millionen für
+# Regionen ohne Strom". Eine Dauer ist kein Zweck: "Zehntausende für Stunden ohne Strom".
+_PURPOSE = re.compile(
+    rf"\s+(?:(?:an|to)\s+(?:(?:die|den|das|the|all)\s+)?(?:{_WHO}|{_STATE})|"
+    r"(?:für|for|para|pour)\s+(?!(?:\S+\s+)?(?:stunden|tage|minuten|wochen|zeit|hours?|days?|minutes|weeks?|"
+    r"horas|días|dias|heures|jours)\b))", re.IGNORECASE)
+# Direkt davor, dazwischen höchstens "mehr als" und ein Wort: "trifft acht Millionen", "power to nearly 2 million"
+_BEFORE = re.compile(
+    r"\b(?:(?:trifft|treffen|traf|betrifft|betreffen|betraf|"
+    r"leaves|leaving|left|hits?|hitting|affects|affecting|affected|impacts|impacting|impacted|plunges|plunging|"
+    r"(?:power|electricity) (?:to|for)|"
+    r"afecta a|afectó a|afectan a|afectaron a|deja a|dejó a|dejan a|dejaron a|"
+    r"afeta|afetou|afetam|atinge|atingiu|atingem|deixa|deixou|deixam|deixando|"
+    r"touche|touchent|prive|privent|colpisce|lascia|lasciano)|"
+    rf"{_STATE}(?:\s+a\b|\s*[:–—-])?)(?:\s+{_ABOUT})?(?:\s+[^\s,;:!?]+(?<!\.))?\s+$", re.IGNORECASE)
+# Geld, Maße und Zeiträume direkt nach der Zahl: "3 Mio. Euro", "2 million in damage", "110.000 Volt". Die
+# Wortgrenze gehört dazu: "Millionen Europäer ohne Strom" ist kein Geld.
+_NOT_PEOPLE = (
+    r"(?![\s-]*(?:(?:de|of|in|en|em|an)\s+|d['’])?(?:(?:"
+    r"euros?|dollars?|dólares|usd|eur|chf|pesos|reais|pounds?|franken|francs?|libras|rupees?|"
+    r"volt|kv|kw|mw|gw|kwh|mwh|gwh|megawatt|kilowatt|gigawatt|watt|lit(?:er|re|ro)s?|gallons?|barrels?|tonnen|"
+    r"tons|toneladas|met(?:er|re)[ns]?|km|kilometern?|jahren?|years?|años|anos|tagen?|days?|días|dias|"
+    r"stunden|hours?|horas|sch[aä]den|verlust(?:e|en)?|kosten|damages?|loss(?:es)?|pérdidas|daños|"
+    r"prejuízos?|dégâts|danni)\b|[€$£]))")
+# Geld vor der Zahl: Währungszeichen ("$3 million"), Verb ("kostet", "pays") oder "Schaden von ..."
+_MONEY_BEFORE = re.compile(
+    r"(?:[$€£]|\b(?:usd|eur|chf))\s*$|"
+    r"\b(?:kostet(?:en?)?|zahlt(?:en?)?|bezahlt(?:en?)?|investiert(?:en?)?|"
+    r"(?-i:kosten|zahlen|bezahlen|investieren)|"
+    r"costs?|pays?|paid|worth|spends?|spent|invests?|invested|"
+    r"cuesta|costó|costará|paga|pagó|invierte|invertirá|custa|custou|investe|investiu|coûte)"
+    r"(?:\s+\S+){0,2}\s+$|"
+    r"\b(?:sch[aä]den|verluste?|kosten|investition(?:en)?|damages?|loss(?:es)?|investments?|pérdidas|daños|"
+    r"inversión|inversiones|prejuízos?|investimentos?|dégâts|pertes|danni)\s+"
+    rf"(?:von|in höhe von|of|de|por|di)(?:\s+{_ABOUT})?(?:\s+[^\s,;:!?]+)?\s+$", re.IGNORECASE)
+_BREAK = re.compile(r"[,;:!?](?=\s|$)|\.(?=\s|$)|\s[-–—|]\s")  # Ende eines Satzteils
+_MILLION = re.compile(
+    r"(\d+(?:[.,]\d+)?)\s*(?:(?:million(?:en|s)?|millones|millón|milhões|milhão|milioni|milione)\b|mio\b\.?)"
+    rf"{_NOT_PEOPLE}", re.IGNORECASE)
+_COUNT = re.compile(rf"(?<![\d.,])(\d{{1,3}}(?:[.,\s]\d{{3}})+|\d{{4,7}})(?!\d){_NOT_PEOPLE}", re.IGNORECASE)
 # Mengenangaben in Worten, die erste passende zählt ("halbe Million" steht deshalb vor "eine Million").
-# Die Werte sind vorsichtige Untergrenzen.
-_WORD_COUNTS = (
-    (re.compile(rf"\b(?:millions|millionen|millones|milhões|milioni)\b{_MONEY}", re.IGNORECASE), 2_000_000),
-    (re.compile(r"half a million|halbe million|medio millón|meio milhão", re.IGNORECASE), 500_000),
-    (re.compile(rf"\b(?:eine|einer|a|one|un|um)\s+(?:million|millón|milhão|milione)\b{_MONEY}", re.IGNORECASE),
-     1_000_000),
-    (re.compile(r"hundreds of thousands|hunderttausende|cientos de miles|centenares de miles|"
-                r"centenas de milhares|centaines de milliers|centinaia di migliaia", re.IGNORECASE), 200_000),
-    (re.compile(r"tens of thousands|zehntausende|decenas de miles|dezenas de milhares|"
-                r"dizaines de milliers|decine di migliaia", re.IGNORECASE), 20_000),
-    (re.compile(r"\b(?:thousands|tausende|miles de|milhares|milliers|migliaia)\b", re.IGNORECASE), 2_000),
-)
+# Die Werte sind vorsichtige Untergrenzen. "3 Millionen" ist keine Angabe in Worten: Darüber entscheidet _MILLION.
+_WORD_COUNTS = tuple((re.compile(pattern + _NOT_PEOPLE, re.IGNORECASE), value) for pattern, value in (
+    (r"(?<!\d\s)\b(?:millions|millionen|millones|milhões|milioni)\b", 2_000_000),
+    (r"half a million|halbe million|medio millón|meio milhão", 500_000),
+    (r"\b(?:eine|einer|a|one|un|um)\s+(?:million|millón|milhão|milione)\b", 1_000_000),
+    (r"hundreds of thousands|hunderttausende|cientos de miles|centenares de miles|"
+     r"centenas de milhares|centaines de milliers|centinaia di migliaia", 200_000),
+    (r"tens of thousands|zehntausende|decenas de miles|dezenas de milhares|"
+     r"dizaines de milliers|decine di migliaia", 20_000),
+    (r"\b(?:thousands|tausende|miles de|milhares|milliers|migliaia)\b", 2_000),
+))
 
 GERMAN = {"AT", "DE", "CH", "LI"}
 SPANISH = {"ES", "MX", "AR", "CL", "CO", "PE", "VE", "EC", "BO", "PY", "UY", "CU", "DO", "PA", "HN", "GT",
            "NI", "CR", "SV", "PR"}
 
 
+def _who(title: str, match) -> str | None:
+    """Wen eine Zahl in einer Schlagzeile zählt: das Wort für die Betroffenen direkt danach ("Haushalte"),
+    "" für Betroffene ohne ein solches Wort ("Millionen ohne Strom"), None für etwas anderes (Geld)."""
+    left = 0
+    for found in _BREAK.finditer(title, 0, match.start()):
+        left = found.end()
+    right = _BREAK.search(title, match.end())
+    after = title[match.end():right.start() if right else len(title)]
+    if _MONEY_BEFORE.search(title[left:match.start()]):
+        return None
+    direct = _DIRECT.match(after)
+    if direct:
+        return direct.group("who") or ""
+    if _LATER.match(after) and not _PURPOSE.match(after):
+        return ""
+    # Der Zustand darf auch vor einem Doppelpunkt stehen: "Ohne Strom: 5.000 Kärntner"
+    return "" if _BEFORE.search(title, 0, match.start()) else None
+
+
 def count_people(title: str) -> int | None:
     """Liest eine Betroffenenzahl aus einer Schlagzeile. Ein Haushalt oder Kunde zählt als zwei Menschen."""
     best = 0
     for match in _MILLION.finditer(title):
-        value = float(match.group(1).replace(",", "."))
-        best = max(best, int(value * 1_000_000 * (2 if match.group(2) else 1)))
+        who = _who(title, match)
+        if who is not None:
+            value = float(match.group(1).replace(",", "."))
+            best = max(best, int(value * 1_000_000 * (2 if _HOUSEHOLD_WORD.fullmatch(who) else 1)))
     for match in _COUNT.finditer(title):
-        value = int(re.sub(r"\D", "", match.group(1)))
-        best = max(best, value * (2 if _HOUSEHOLD_WORD.fullmatch(match.group(2)) else 1))
+        who = _who(title, match)
+        # Vier Ziffern ohne Tausenderpunkt sind ohne Hauptwort meist eine Jahreszahl ("seit 2019 ohne Strom").
+        if who is None or (not who and len(match.group(1)) == 4):
+            continue
+        best = max(best, int(re.sub(r"\D", "", match.group(1))) * (2 if _HOUSEHOLD_WORD.fullmatch(who) else 1))
     if not best:
         for pattern, value in _WORD_COUNTS:
-            if pattern.search(title):
+            if any(_who(title, match) is not None for match in pattern.finditer(title)):
                 best = value
                 break
     return best or None

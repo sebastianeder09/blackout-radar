@@ -57,10 +57,59 @@ class Headlines(unittest.TestCase):
             # So stand es am 27.11.2026 im Feed der Folha de S.Paulo
             "Tempestade e ventania provocam inundações, atrasam voos e deixam quase 1 milhão sem luz nos EUA": 1_000_000,
             "Apagón deja a 1 millón de usuarios sin luz": 2_000_000,
+            # Ohne Hauptwort direkt nach der Zahl. Die erste stand am 27.11.2026 auf polizeiticker.at.
+            "20.000 von Stromausfall in Linz betroffen – Staatsschutz ermittelt": 20_000,
+            "Sturm: 300.000 ohne Strom": 300_000,
+            "Storm cuts power to 400,000 in Florida": 400_000,
+            "Blackout: Millionen Österreicher ohne Strom": 2_000_000,
+            "Stromausfall trifft acht Millionen Chilenen": 2_000_000,
+            "Nuevo apagón masivo afecta a millones de cubanos": 2_000_000,
+            "Ohne Strom: 5.000 Kärntner": 5_000,
+            "Zehntausende für Stunden ohne Strom": 20_000,
+            "Stromausfall: 3 Mio. Haushalte betroffen": 6_000_000,
+            "50 Millionen Europäer ohne Strom": 50_000_000,  # "Euro" steckt hier nur im Wort
+            # Neben Geld und Maßen zählen die Betroffenen weiter
+            "3 Millionen Menschen ohne Strom, Schäden in Milliardenhöhe": 3_000_000,
+            "Unwetter: Schäden von 3 Millionen und 20.000 Haushalte ohne Strom": 40_000,
+            "Blackout costs businesses millions as thousands remain without power": 2_000,
+            "380.000 Volt Leitung defekt, Tausende ohne Strom": 2_000,
         }
         for title, expected in cases.items():
             with self.subTest(title=title):
                 self.assertEqual(news.count_people(title), expected)
+
+    def test_money_and_measures_are_no_people(self):
+        """Eine Zahl zählt nur, wenn die Schlagzeile an der Stelle sagt, wer betroffen ist."""
+        for title in (
+                # So stand es am 27.11.2026 auf eldigitaldecuenca.com
+                "Un pueblo de Cuenca, clave tras el gran apagón: una infraestructura de más de 100 millones "
+                "reforzará la red eléctrica de España",
+                "Stromausfall in Wien: Schaden geht in die Millionen",
+                "Stromausfall in Linz: Linz AG investiert 100 Millionen in das Netz",
+                "Stromausfall verursacht 3 Mio. Euro Schaden",
+                "Stromausfall verursacht Hunderttausende Euro Schaden",
+                "Stromausfall in Linz verursacht Millionen-Schaden",
+                "Power outage causes $3 million in damage",
+                "Power outage causes 3 million in damage",
+                "Outage costs city millions",
+                "Apagón deja pérdidas por 5 millones en comercios",
+                # Empfänger und Zweck einer Summe
+                "Stadtwerke zahlen 2 Millionen an Kunden ohne Strom",
+                "Land gibt 10 Millionen an Betroffene",
+                "EU gibt 100 Millionen für Regionen ohne Strom",
+                "Blackout: Schäden von 3 Millionen bei Kunden",
+                # Maße, Jahreszahlen, Postleitzahlen
+                "Stromausfall nach Brand in 110.000-Volt-Umspannwerk",
+                "Linz ohne Strom: 110.000 Volt Leitung gerissen",
+                "Skigebiet auf 2.000 Metern ohne Strom",
+                "Seit 2019 ohne Strom: Dorf wartet weiter",
+                "Stromausfall in 4020 Linz",
+                "Stromausfall legt Millionenstadt lahm",
+                # Das Verb gehört nur direkt vor der Zahl zu ihr
+                "Sturm trifft Linz: 2 Millionen",
+                "Blackout hits bank with 2 million"):
+            with self.subTest(title=title):
+                self.assertIsNone(news.count_people(title))
 
     def test_relevant_headlines(self):
         for language, title in (("de", "Stromausfall in Linz: 20.000 Haushalte ohne Strom"),
@@ -530,6 +579,16 @@ class Stories(unittest.TestCase):
         signal = self.media_signals(self.collect(5))["AT"]
         self.assertEqual(signal.metrics["sources"], 2)
         self.assertIsNone(signal.severity)  # die Millionen aus den Auslandsberichten zählen nicht mit
+
+    def test_damage_in_a_headline_does_not_make_an_outage_large(self):
+        # Vorher zählte "Schaden geht in die Millionen" als 2 Millionen Betroffene: für Österreich ein Alarm.
+        self.feeds["Österreich"] = [
+            item("Stromausfall in Wien: Schaden geht in die Millionen", "orf.at", at(-10)),
+            item("Stromausfall in Wien: Wiener Netze investieren 100 Millionen", "kurier.at", at(-5))]
+        signal = self.media_signals(self.collect(0))["AT"]
+        self.assertEqual(signal.metrics["sources"], 2)
+        self.assertIsNone(signal.severity)
+        self.assertEqual(signal.detail, "2 Medien berichten, Größe unbekannt")
 
     def test_whole_island_is_not_the_whole_country_in_a_large_state(self):
         self.feeds["nationwide blackout"] = [

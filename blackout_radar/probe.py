@@ -1,7 +1,8 @@
 """Diagnose: fragt jede Datenquelle einmal roh ab und zeigt, was zurückkommt.
 
-Aufruf:  python -m blackout_radar probe [--only load,frequency,news,utility,ioda,ntfy]
+Aufruf:  python -m blackout_radar probe [--only load,frequency,news,feeds,utility,ntfy]
          python -m blackout_radar probe --only replay   Lastauswertung an echten Tagen nachspielen
+         python -m blackout_radar probe --only ioda     IODA (antwortet automatischen Abfragen bisher nicht)
 
 Gedacht zum Einrichten und für den Fall, dass eine Quelle ihr Format ändert.
 Es werden nur die festen Adressen der Datenquellen abgefragt, nichts wird gespeichert
@@ -16,7 +17,7 @@ import traceback
 import xml.etree.ElementTree as ET
 from datetime import timedelta
 
-from . import gazetteer, http
+from . import areas, http
 from .collectors import energy_charts, linznetz, news
 from .http import HttpError
 from .model import fmt_number, iso, parse_ts
@@ -298,7 +299,28 @@ def probe_ioda(cfg: dict, now) -> None:
 
 
 # ------------------------------------------------------------------- Medien
-def _headlines(query: dict, now, limit: int) -> None:
+KINDS = {"lead": "Erstbericht", "cause": "Ursache", "follow": "Aufarbeitung"}
+
+
+def _lands(section: dict) -> frozenset:
+    """Bundesländer mit eigener Suche, wie in news.collect."""
+    return frozenset(query["area"] for query in section.get("priority_queries") or []
+                     if query.get("area") in areas.REGIONS)
+
+
+def _line(query: dict, item: dict, now, lands: frozenset) -> str:
+    """Eine Schlagzeile mit dem, was das Programm aus ihr liest: Art, Gebiet (* = von der Schlagzeile genannt), Zahl."""
+    title, language = item["title"], query.get("hl", "de")
+    kind = KINDS[news.phase(title)] if news.relevant(title, language) else "–"
+    targets, named = news._targets(query, title, language, lands)
+    where = ",".join(area + ("*" if area in named else "") for area in targets) or "?"
+    people = news.count_people(title)
+    age = int((now - item["when"]).total_seconds() // 60)
+    return (f"    vor {age:>4} min | {kind:<12} | {where:<10} | {fmt_number(people) if people else '–':>9} "
+            f"| {item['domain']} | {title}")
+
+
+def _headlines(query: dict, now, limit: int, lands: frozenset) -> None:
     """Zeigt, was eine Suche liefert und wie das Programm jede Schlagzeile einordnet."""
     print(f"  Suche ({query.get('hl', 'de')}, {query.get('gl', 'AT')}): {query['q']}")
     try:
@@ -307,27 +329,45 @@ def _headlines(query: dict, now, limit: int) -> None:
         print(f"  FEHLER: {err}")
         return
     language = query.get("hl", "de")
-    kinds = {"lead": "Erstbericht", "cause": "Ursache", "follow": "Aufarbeitung"}
     items.sort(key=lambda item: item["when"], reverse=True)
     hits = sum(1 for item in items if news.relevant(item["title"], language))
     print(f"  {len(items)} Einträge, davon {hits} über einen Stromausfall")
     for item in items[:limit]:
-        title = item["title"]
-        kind = kinds[news.phase(title)] if news.relevant(title, language) else "–"
-        people = news.count_people(title)
-        age = int((now - item["when"]).total_seconds() // 60)
-        print(f"    vor {age:>4} min | {kind:<12} | {','.join(gazetteer.find(title, language)) or '?':<10} "
-              f"| {fmt_number(people) if people else '–':>9} | {item['domain']} | {title}")
+        print(_line(query, item, now, lands))
 
 
 def probe_news(cfg: dict, now) -> None:
     section = cfg["sources"]["news"]
+    lands = _lands(section)
     for query in section.get("priority_queries") or []:
-        _headlines(query, now, limit=12)
+        _headlines(query, now, limit=12, lands=lands)
         time.sleep(2)
     for query in section.get("world_queries") or []:
-        _headlines(query, now, limit=25)
+        _headlines(query, now, limit=25, lands=lands)
         time.sleep(2)
+
+
+def probe_feeds(cfg: dict, now) -> None:
+    """Fragt jeden Feed aus Übersee einmal ab und zeigt die Schlagzeilen über Stromausfälle."""
+    section = cfg["sources"]["news"]
+    lands, working = _lands(section), 0
+    feeds = section.get("feeds") or []
+    for query in map(news.feed_query, feeds):
+        name = news._label(query)
+        try:
+            items = news.fetch_feed(query)
+        except (HttpError, ET.ParseError) as err:
+            print(f"  FEHLER {name}: {err}")
+            continue
+        working += bool(items)
+        items.sort(key=lambda item: item["when"], reverse=True)
+        hits = [item for item in items if news.relevant(item["title"], query["hl"])]
+        age = max(0, int((now - items[0]["when"]).total_seconds() // 60)) if items else 0  # Uhren gehen ungleich
+        newest = f"neuester vor {age} min" if items else "ohne Einträge"
+        print(f"  {name} ({query['hl']}): {len(items)} Einträge, {newest}, {len(hits)} über einen Stromausfall")
+        for item in hits[:5]:
+            print(_line(query, item, now, lands))
+    print(f"  {working} von {len(feeds)} Feeds liefern Einträge")
 
 
 # ------------------------------------------------------------ Störmeldungen OÖ
@@ -360,15 +400,17 @@ PROBES = {
     "load": ("Stromlast (Energy-Charts)", probe_load),
     "frequency": ("Netzfrequenz", probe_frequency),
     "news": ("Medien (Google News)", probe_news),
+    "feeds": ("Medien (Feeds aus Übersee)", probe_feeds),
     "utility": ("Störmeldungen LINZ NETZ", probe_utility),
-    "ioda": ("Internet-Ausfälle (IODA)", probe_ioda),
     "ntfy": ("Push-Dienst ntfy", probe_ntfy),
 }
 
 
-# Läuft nur auf ausdrücklichen Wunsch (--only), weil es mehrere große Abfragen braucht.
+# Laufen nur auf ausdrücklichen Wunsch (--only): replay braucht mehrere große Abfragen, und IODA antwortet
+# automatischen Abfragen bisher nicht (jede Abfrage wartet dann bis zum Zeitlimit).
 EXTRAS = {
     "replay": ("Rückblick: Lastauswertung an echten Tagen", probe_replay),
+    "ioda": ("Internet-Ausfälle (IODA)", probe_ioda),
 }
 
 

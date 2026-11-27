@@ -32,12 +32,23 @@ def collect_all(cfg: dict, state: dict, now, context: dict | None = None):
         try:
             found = func(section, cursor, now, context or {})
             signals += found
-            entry.update({"last_ok": iso(now), "fail_since": None, "last_error": None})
-            health[name] = {"ok": True, "signals": len(found), "data_time": cursor.get("data_time"),
-                            "note": cursor.get("note", "")}
+            partial = str(cursor.get("degraded") or "")[:300]
+            if partial:
+                # Ein Teil der Quelle fällt aus (bei den Medien: Google News oder die Feeds). Die Signale
+                # zählen, der Ausfall wird aber wie eine Störung verfolgt und nach einigen Stunden gemeldet.
+                log.warning("Quelle %s eingeschränkt: %s", name, partial)
+                entry.update({"last_ok": iso(now), "last_error": partial, "partial": True,
+                              "fail_since": entry["fail_since"] or iso(now)})
+                health[name] = {"ok": False, "partial": True, "error": partial, "signals": len(found),
+                                "data_time": cursor.get("data_time")}
+            else:
+                entry.update({"last_ok": iso(now), "fail_since": None, "last_error": None, "partial": False})
+                health[name] = {"ok": True, "signals": len(found), "data_time": cursor.get("data_time"),
+                                "note": cursor.get("note", "")}
         except Exception as err:  # eine kaputte Quelle darf den Lauf nicht abbrechen
             log.warning("Quelle %s fehlgeschlagen: %s", name, err)
             entry["last_error"] = str(err)[:300]
             entry["fail_since"] = entry["fail_since"] or iso(now)
+            entry["partial"] = False
             health[name] = {"ok": False, "error": str(err)[:300], "data_time": cursor.get("data_time")}
     return signals, health

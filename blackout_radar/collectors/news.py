@@ -1,11 +1,14 @@
-"""Medienberichte über Stromausfälle (Google News, RSS-Suche).
+"""Medienberichte über Stromausfälle (Google News als RSS-Suche, dazu Feeds großer Medien aus Übersee).
 
-Drei Suchen:
+Vier Wege:
   Vorrang    feste Suchen für Vorrang-Gebiete (Oberösterreich, Österreich). Für Oberösterreich
              zählt schon ein Bericht.
   Welt       Suche nach großen Ausfällen in mehreren Sprachen. Das Gebiet wird aus der
              Schlagzeile gelesen. Es zählt erst, wenn mehrere Medien berichten.
   Nachweis   gezielte Suche zu Gebieten, in denen ein Messsignal anschlägt.
+  Feeds      die Welt-Nachrichten großer Medien in Amerika, Asien und Australien, reihum
+             abgefragt. Sie hängen weder an Google noch an Europa: Fällt dort großflächig der
+             Strom aus, berichten sie weiter. Gezählt wird wie bei der Welt-Suche.
 
 Aus den Berichten je Gebiet entsteht ein Medien-Signal (media_outage) mit geschätzter
 Größe: Zahlen aus der Schlagzeile ("20.000 Haushalte"), "landesweit" oder die Breite der
@@ -27,15 +30,21 @@ Was nichts auslöst:
   - Folgen, Ursache und Kritik ("... nach Stromausfall", "Staatsschutz ermittelt"), wenn es
     im Gebiet in den letzten Tagen schon Berichte über einen Stromausfall gab.
 
+Orte in Österreich: Nennt eine Schlagzeile aus einer Österreich-Suche keinen bekannten Ort, entscheidet
+das amtliche Gemeindeverzeichnis (gazetteer.austria). "Stromausfall in Tragwein" zählt damit für
+Oberösterreich, "Stromausfälle in Lieboch" (Steiermark) für Österreich und nicht für Oberösterreich.
+
 Die RSS-Suche von Google News ist für Feed-Leser gedacht und nicht garantiert. Dieses
 Programm fragt sie sparsam ab (wenige Suchen je Lauf).
 """
 from __future__ import annotations
 
+import html
+import logging
 import re
 import time
 import xml.etree.ElementTree as ET
-from datetime import timedelta
+from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
 
@@ -43,10 +52,14 @@ from .. import areas, gazetteer, http
 from ..http import HttpError
 from ..model import UTC, Signal, fmt_people, iso, parse_ts
 
+log = logging.getLogger("blackout_radar")
+
 SOURCE = "news"   # einzelner Bericht
 MEDIA = "media"   # verdichtetes Signal je Gebiet
 GOOGLE_NEWS = "https://news.google.com/rss/search"
 PAUSE_SECONDS = 1.0  # Abstand zwischen zwei Suchen
+FEED_MAX_BYTES = 3_000_000  # größere Antworten werden nicht gelesen
+GOOGLE, FEEDS = "Google News", "Feeds aus Übersee"
 
 POWER_WORDS = re.compile(
     r"blackout|black-out|power outages?|power cuts?|power failure|without power|without electricity|"
@@ -133,6 +146,23 @@ WHOLE_AREA = re.compile(
     r"completely without power|ganz \w+ ohne strom|apagón (?:general|total)|colapso (?:total|del sistema)|"
     r"apagão (?:geral|total)", re.IGNORECASE)
 WHOLE_AREA_MAX_POPULATION = 30_000_000
+# Ausfall in ganz Europa. Die Schlagzeile muss den Ausfall selbst so nennen ("europaweiter Stromausfall",
+# "ganz Europa ohne Strom"), nicht nur seine Folgen ("Stromausfall: Zugverkehr europaweit gestört").
+# "Across Europe" fehlt mit Absicht: So heißt es auch bei einem Sturm über mehreren Ländern.
+_OUT_DE = r"(?:stromausf[aä]lle?s?|stromstörung(?:en)?|blackouts?)"
+_DARK_DE = r"(?:ohne strom|kein strom|stromlos|im dunkeln|dunkel|finster)"
+_OUT_EN = r"(?:blackouts?|power outages?|outages?|power cuts?|power failures?|grid collapse|grid failure)"
+_DARK_EN = r"(?:without power|without electricity|in(?:to)? (?:the )?dark(?:ness)?|loses? power|lost power)"
+_ALL_EN = r"(?:all of europe|the whole of europe|whole of europe|the entire continent|entire continent)"
+EUROPE_WIDE = re.compile(
+    rf"europa-?weite[rnms]? (?:[\w-]+ )?{_OUT_DE}|europa-?weit (?:{_DARK_DE}|{_OUT_DE})|"
+    rf"{_OUT_DE} (?:in|legt|trifft|erfasst|lähmt) ganz europa|ganz europa (?:[\w-]+ ){{0,2}}{_DARK_DE}|"
+    rf"(?:europe|continent)-wide (?:[\w-]+ )?{_OUT_EN}|"
+    rf"{_OUT_EN} (?:[\w-]+ ){{0,2}}{_ALL_EN}|{_ALL_EN} (?:[\w-]+ ){{0,2}}{_DARK_EN}|"
+    r"apagón (?:[\w-]+ )?en toda europa|toda europa (?:[\w-]+ )?(?:sin luz|sin electricidad|a oscuras)|"
+    r"(?:panne|coupure)[^,.;:!?]{0,40}dans toute l.europe|toute l.europe (?:[\w-]+ ){0,2}(?:sans électricité|dans le noir)|"
+    r"(?:blackout|black-out) in tutta (?:l.)?europa|tutta (?:l.)?europa (?:[\w-]+ )?(?:senza corrente|senza elettricità|al buio)",
+    re.IGNORECASE)
 # Eigene Namen großer Staaten, soweit sie vom deutschen und englischen abweichen
 _OWN_NAMES = {"ES": "España", "MX": "México", "BR": "Brasil", "PE": "Perú", "IT": "Italia", "TR": "Türkiye"}
 
@@ -145,43 +175,121 @@ BIG_WORDS = re.compile(
 _HOUSEHOLDS = (r"haushalte|households|homes|customers|kunden|anlagen|clientes|usuarios|hogares|abonnés|"
                r"foyers|utenti|famiglie")
 _PERSONS = r"menschen|people|personen|einwohner|residents|personas|habitantes|pessoas|personnes|persone"
-_MONEY = r"(?!\s*(?:de\s+)?(?:euros?|dollars?|dólares|usd|eur|€|\$|pesos|reais|pounds?|franken))"
-_MILLION = re.compile(
-    rf"(\d+(?:[.,]\d+)?)\s*(?:million|millionen|mio\.?|millones|milhões|millions|milioni)\b{_MONEY}"
-    rf"(?:\s+(?:de\s+|d')?({_HOUSEHOLDS}))?", re.IGNORECASE)
-_COUNT = re.compile(rf"(\d{{1,3}}(?:[.,\s]\d{{3}})+|\d{{4,7}})\s*({_HOUSEHOLDS}|{_PERSONS})", re.IGNORECASE)
 _HOUSEHOLD_WORD = re.compile(_HOUSEHOLDS, re.IGNORECASE)
+# Eine Zahl zählt nur dann als Betroffene, wenn die Schlagzeile das an dieser Stelle sagt: mit einem Wort für
+# die Betroffenen ("3 Millionen Menschen", "20.000 Haushalte"), mit ihrem Zustand ("Millionen ohne Strom",
+# "20.000 von Stromausfall in Linz betroffen") oder mit dem Verb davor ("trifft 2 Millionen", "deja sin luz a
+# millones"). Sonst zählt sie oft etwas anderes: "Schaden geht in die Millionen", "investiert 100 Millionen
+# in das Netz" und "100 millones reforzará la red" (so am 27.11.2026 in einer Schlagzeile aus Spanien).
+_WHO = rf"(?:{_HOUSEHOLDS}|{_PERSONS})"
+_STATE = (r"(?:ohne strom|ohne elektrizität|stromlos|im dunkeln|im finstern|betroffen|"
+          r"without (?:power|electricity)|in(?:to)? (?:the )?dark(?:ness)?|(?:lose|loses|lost|losing) power|"
+          r"blacked out|affected|impacted|"
+          r"sin (?:luz|electricidad|energ[ií]a|servicio|suministro)|a oscuras|afectad[oa]s|"
+          r"sem (?:luz|energia|eletricidade)|às escuras|no escuro|afetad[oa]s|"
+          r"sans (?:électricité|courant)|dans le noir|privée?s d.électricité|"
+          r"senza (?:corrente|elettricità|luce)|al buio)")
+_ABOUT = (r"(?:rund|etwa|fast|knapp|über|mehr als|bis zu|mindestens|circa|ca\.?|about|nearly|almost|over|"
+          r"more than|up to|at least|around|some|roughly|más de|casi|cerca de|unos|unas|al menos|mais de|quase|"
+          r"pelo menos|plus de|près de|environ|oltre|quasi)")
+# Direkt nach der Zahl
+_DIRECT = re.compile(rf"\s*(?:(?:de|of|von|di)\s+|d['’])?(?P<who>{_WHO})|\s+{_STATE}", re.IGNORECASE)
+# Später im selben Satzteil: "Millionen Österreicher ohne Strom", "millions of East Coast residents"
+_LATER = re.compile(rf"(?:\s+\S+){{1,5}}?\s+(?:{_WHO}|{_STATE})", re.IGNORECASE)
+# ... aber nicht als Empfänger oder Zweck einer Summe: "2 Millionen an Kunden ohne Strom", "100 Millionen für
+# Regionen ohne Strom". Eine Dauer ist kein Zweck: "Zehntausende für Stunden ohne Strom".
+_PURPOSE = re.compile(
+    rf"\s+(?:(?:an|to)\s+(?:(?:die|den|das|the|all)\s+)?(?:{_WHO}|{_STATE})|"
+    r"(?:für|for|para|pour)\s+(?!(?:\S+\s+)?(?:stunden|tage|minuten|wochen|zeit|hours?|days?|minutes|weeks?|"
+    r"horas|días|dias|heures|jours)\b))", re.IGNORECASE)
+# Direkt davor, dazwischen höchstens "mehr als" und ein Wort: "trifft acht Millionen", "power to nearly 2 million"
+_BEFORE = re.compile(
+    r"\b(?:(?:trifft|treffen|traf|betrifft|betreffen|betraf|"
+    r"leaves|leaving|left|hits?|hitting|affects|affecting|affected|impacts|impacting|impacted|plunges|plunging|"
+    r"(?:power|electricity) (?:to|for)|"
+    r"afecta a|afectó a|afectan a|afectaron a|deja a|dejó a|dejan a|dejaron a|"
+    r"afeta|afetou|afetam|atinge|atingiu|atingem|deixa|deixou|deixam|deixando|"
+    r"touche|touchent|prive|privent|colpisce|lascia|lasciano)|"
+    rf"{_STATE}(?:\s+a\b|\s*[:–—-])?)(?:\s+{_ABOUT})?(?:\s+[^\s,;:!?]+(?<!\.))?\s+$", re.IGNORECASE)
+# Geld, Maße und Zeiträume direkt nach der Zahl: "3 Mio. Euro", "2 million in damage", "110.000 Volt". Die
+# Wortgrenze gehört dazu: "Millionen Europäer ohne Strom" ist kein Geld.
+_NOT_PEOPLE = (
+    r"(?![\s-]*(?:(?:de|of|in|en|em|an)\s+|d['’])?(?:(?:"
+    r"euros?|dollars?|dólares|usd|eur|chf|pesos|reais|pounds?|franken|francs?|libras|rupees?|"
+    r"volt|kv|kw|mw|gw|kwh|mwh|gwh|megawatt|kilowatt|gigawatt|watt|lit(?:er|re|ro)s?|gallons?|barrels?|tonnen|"
+    r"tons|toneladas|met(?:er|re)[ns]?|km|kilometern?|jahren?|years?|años|anos|tagen?|days?|días|dias|"
+    r"stunden|hours?|horas|sch[aä]den|verlust(?:e|en)?|kosten|damages?|loss(?:es)?|pérdidas|daños|"
+    r"prejuízos?|dégâts|danni)\b|[€$£]))")
+# Geld vor der Zahl: Währungszeichen ("$3 million"), Verb ("kostet", "pays") oder "Schaden von ..."
+_MONEY_BEFORE = re.compile(
+    r"(?:[$€£]|\b(?:usd|eur|chf))\s*$|"
+    r"\b(?:kostet(?:en?)?|zahlt(?:en?)?|bezahlt(?:en?)?|investiert(?:en?)?|"
+    r"(?-i:kosten|zahlen|bezahlen|investieren)|"
+    r"costs?|pays?|paid|worth|spends?|spent|invests?|invested|"
+    r"cuesta|costó|costará|paga|pagó|invierte|invertirá|custa|custou|investe|investiu|coûte)"
+    r"(?:\s+\S+){0,2}\s+$|"
+    r"\b(?:sch[aä]den|verluste?|kosten|investition(?:en)?|damages?|loss(?:es)?|investments?|pérdidas|daños|"
+    r"inversión|inversiones|prejuízos?|investimentos?|dégâts|pertes|danni)\s+"
+    rf"(?:von|in höhe von|of|de|por|di)(?:\s+{_ABOUT})?(?:\s+[^\s,;:!?]+)?\s+$", re.IGNORECASE)
+_BREAK = re.compile(r"[,;:!?](?=\s|$)|\.(?=\s|$)|\s[-–—|]\s")  # Ende eines Satzteils
+_MILLION = re.compile(
+    r"(\d+(?:[.,]\d+)?)\s*(?:(?:million(?:en|s)?|millones|millón|milhões|milhão|milioni|milione)\b|mio\b\.?)"
+    rf"{_NOT_PEOPLE}", re.IGNORECASE)
+_COUNT = re.compile(rf"(?<![\d.,])(\d{{1,3}}(?:[.,\s]\d{{3}})+|\d{{4,7}})(?!\d){_NOT_PEOPLE}", re.IGNORECASE)
 # Mengenangaben in Worten, die erste passende zählt ("halbe Million" steht deshalb vor "eine Million").
-# Die Werte sind vorsichtige Untergrenzen.
-_WORD_COUNTS = (
-    (re.compile(rf"\b(?:millions|millionen|millones|milhões|milioni)\b{_MONEY}", re.IGNORECASE), 2_000_000),
-    (re.compile(r"half a million|halbe million|medio millón|meio milhão", re.IGNORECASE), 500_000),
-    (re.compile(rf"\b(?:eine|einer|a|one|un|um)\s+(?:million|millón|milhão|milione)\b{_MONEY}", re.IGNORECASE),
-     1_000_000),
-    (re.compile(r"hundreds of thousands|hunderttausende|cientos de miles|centenares de miles|"
-                r"centenas de milhares|centaines de milliers|centinaia di migliaia", re.IGNORECASE), 200_000),
-    (re.compile(r"tens of thousands|zehntausende|decenas de miles|dezenas de milhares|"
-                r"dizaines de milliers|decine di migliaia", re.IGNORECASE), 20_000),
-    (re.compile(r"\b(?:thousands|tausende|miles de|milhares|milliers|migliaia)\b", re.IGNORECASE), 2_000),
-)
+# Die Werte sind vorsichtige Untergrenzen. "3 Millionen" ist keine Angabe in Worten: Darüber entscheidet _MILLION.
+_WORD_COUNTS = tuple((re.compile(pattern + _NOT_PEOPLE, re.IGNORECASE), value) for pattern, value in (
+    (r"(?<!\d\s)\b(?:millions|millionen|millones|milhões|milioni)\b", 2_000_000),
+    (r"half a million|halbe million|medio millón|meio milhão", 500_000),
+    (r"\b(?:eine|einer|a|one|un|um)\s+(?:million|millón|milhão|milione)\b", 1_000_000),
+    (r"hundreds of thousands|hunderttausende|cientos de miles|centenares de miles|"
+     r"centenas de milhares|centaines de milliers|centinaia di migliaia", 200_000),
+    (r"tens of thousands|zehntausende|decenas de miles|dezenas de milhares|"
+     r"dizaines de milliers|decine di migliaia", 20_000),
+    (r"\b(?:thousands|tausende|miles de|milhares|milliers|migliaia)\b", 2_000),
+))
 
 GERMAN = {"AT", "DE", "CH", "LI"}
 SPANISH = {"ES", "MX", "AR", "CL", "CO", "PE", "VE", "EC", "BO", "PY", "UY", "CU", "DO", "PA", "HN", "GT",
            "NI", "CR", "SV", "PR"}
 
 
+def _who(title: str, match) -> str | None:
+    """Wen eine Zahl in einer Schlagzeile zählt: das Wort für die Betroffenen direkt danach ("Haushalte"),
+    "" für Betroffene ohne ein solches Wort ("Millionen ohne Strom"), None für etwas anderes (Geld)."""
+    left = 0
+    for found in _BREAK.finditer(title, 0, match.start()):
+        left = found.end()
+    right = _BREAK.search(title, match.end())
+    after = title[match.end():right.start() if right else len(title)]
+    if _MONEY_BEFORE.search(title[left:match.start()]):
+        return None
+    direct = _DIRECT.match(after)
+    if direct:
+        return direct.group("who") or ""
+    if _LATER.match(after) and not _PURPOSE.match(after):
+        return ""
+    # Der Zustand darf auch vor einem Doppelpunkt stehen: "Ohne Strom: 5.000 Kärntner"
+    return "" if _BEFORE.search(title, 0, match.start()) else None
+
+
 def count_people(title: str) -> int | None:
     """Liest eine Betroffenenzahl aus einer Schlagzeile. Ein Haushalt oder Kunde zählt als zwei Menschen."""
     best = 0
     for match in _MILLION.finditer(title):
-        value = float(match.group(1).replace(",", "."))
-        best = max(best, int(value * 1_000_000 * (2 if match.group(2) else 1)))
+        who = _who(title, match)
+        if who is not None:
+            value = float(match.group(1).replace(",", "."))
+            best = max(best, int(value * 1_000_000 * (2 if _HOUSEHOLD_WORD.fullmatch(who) else 1)))
     for match in _COUNT.finditer(title):
-        value = int(re.sub(r"\D", "", match.group(1)))
-        best = max(best, value * (2 if _HOUSEHOLD_WORD.fullmatch(match.group(2)) else 1))
+        who = _who(title, match)
+        # Vier Ziffern ohne Tausenderpunkt sind ohne Hauptwort meist eine Jahreszahl ("seit 2019 ohne Strom").
+        if who is None or (not who and len(match.group(1)) == 4):
+            continue
+        best = max(best, int(re.sub(r"\D", "", match.group(1))) * (2 if _HOUSEHOLD_WORD.fullmatch(who) else 1))
     if not best:
         for pattern, value in _WORD_COUNTS:
-            if pattern.search(title):
+            if any(_who(title, match) is not None for match in pattern.finditer(title)):
                 best = value
                 break
     return best or None
@@ -203,6 +311,8 @@ def phase(title: str) -> str:
 
 def nationwide(title: str, area: str) -> bool:
     """Wahr, wenn die Schlagzeile einen Ausfall im ganzen Gebiet beschreibt."""
+    if area == areas.EUROPE_WIDE:
+        return bool(EUROPE_WIDE.search(title))
     if NATIONWIDE.search(title):
         return True
     if not WHOLE_AREA.search(title):
@@ -246,6 +356,52 @@ def fetch(query: str, language: str, country: str, edition: str | None = None) -
     return items
 
 
+def _when(text: str | None):
+    """Zeitangabe eines Feed-Eintrags: RSS schreibt sie nach RFC 822, Atom nach ISO 8601."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        try:
+            when = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return when if when.tzinfo else when.replace(tzinfo=UTC)
+
+
+def parse_feed(raw: bytes, domain: str) -> list[dict]:
+    """Einträge eines RSS- oder Atom-Feeds. Gelesen werden Bytes, damit die Kodierung aus dem XML-Kopf gilt."""
+    items = []
+    for node in ET.fromstring(raw.lstrip()).iter():
+        if node.tag.rsplit("}", 1)[-1] not in ("item", "entry"):
+            continue
+        fields: dict[str, str] = {}
+        for child in node:
+            name = child.tag.rsplit("}", 1)[-1]
+            if name == "link" and child.get("href"):  # Atom
+                if child.get("rel", "alternate") == "alternate":
+                    fields.setdefault("link", child.get("href").strip())
+            elif name in ("title", "link", "pubDate", "published", "updated", "date"):
+                fields.setdefault(name, "".join(child.itertext()).strip())
+        when = _when(fields.get("pubDate") or fields.get("published") or fields.get("date") or fields.get("updated"))
+        title = " ".join(html.unescape(fields.get("title", "")).split())
+        if title and when:  # ohne Zeitangabe lässt sich nicht sagen, ob der Bericht neu ist
+            items.append({"title": title, "domain": domain, "when": when, "url": fields.get("link", "")})
+    return items
+
+
+def feed_query(feed: dict) -> dict:
+    """Abfrage zu einem Feed aus der Konfiguration. Ohne Angabe gilt er als englisch."""
+    return {"hl": "en", **feed, "feed": True}
+
+
+def fetch_feed(feed: dict) -> list[dict]:
+    _, _, raw = http.request(feed["url"], timeout=15, limit=FEED_MAX_BYTES)
+    return parse_feed(raw, feed.get("domain") or medium(urlsplit(feed["url"]).netloc))
+
+
 def confirm_query(area: str) -> dict:
     """Suche, die zu einem Gebiet mit Messsignal Berichte über einen Stromausfall findet."""
     parent = areas.parent(area)
@@ -276,7 +432,8 @@ def _note(stories: dict, area: str, item: dict, named: bool = True) -> None:
         story["people"] = max(story["people"] or 0, people)
     if nationwide(item["title"], area):
         story["nationwide"] = True
-    if BIG_WORDS.search(item["title"]) or WHOLE_AREA.search(item["title"]):
+    # Wer "Europa" als betroffen nennt, meint keinen örtlichen Ausfall.
+    if BIG_WORDS.search(item["title"]) or WHOLE_AREA.search(item["title"]) or area == areas.EUROPE_WIDE:
         story["big"] = True
 
 
@@ -287,8 +444,11 @@ def _signal(area: str, story: dict, cfg: dict) -> Signal:
     detail = "1 Medium berichtet" if count == 1 else f"{count} Medien berichten"
     if story["nationwide"] and population:
         people = max(people or 0, population // 2)
-        detail += ", landesweiter Ausfall laut Schlagzeilen" if areas.parent(area) == area \
-            else ", flächendeckender Ausfall laut Schlagzeilen"
+        if area == areas.EUROPE_WIDE:
+            detail += ", europaweiter Ausfall laut Schlagzeilen"
+        else:
+            detail += ", landesweiter Ausfall laut Schlagzeilen" if areas.parent(area) == area \
+                else ", flächendeckender Ausfall laut Schlagzeilen"
     elif people:
         detail += f", rund {fmt_people(people)} Betroffene laut Schlagzeilen"
     elif story.get("big") and count >= cfg["big_sources"] and population:
@@ -312,10 +472,32 @@ def _opens(stories: dict, closed: dict, area: str, when, window, settled: bool) 
     return story is None or when <= parse_ts(story["first"]) + window
 
 
-def _targets(query: dict, title: str, language: str) -> tuple[list, list]:
+def _austrian(fixed: str, title: str, lands: frozenset) -> list:
+    """Ordnet eine Schlagzeile aus einer Österreich-Suche über das amtliche Gemeindeverzeichnis zu.
+
+    lands sind die Bundesländer mit eigener Suche (Oberösterreich), fixed ist das Gebiet der Suche. Liegt ein
+    genannter Ort eindeutig in einem dieser Bundesländer, zählt der Bericht dafür. Sonst zählt er für
+    Österreich. Ausnahme: Einen Namen, den es auch im Bundesland der Suche gibt ("Neumarkt" in der Suche für
+    Oberösterreich), entscheidet das Verzeichnis nicht. Dort ordnet wie bisher die Suche zu.
+    """
+    certain, possible = gazetteer.austria(title)
+    own = sorted(certain & lands)
+    if own:
+        return own
+    if not certain and fixed in possible:
+        return []
+    return ["AT"] if certain or possible else []
+
+
+def _targets(query: dict, title: str, language: str, lands: frozenset = frozenset()) -> tuple[list, list]:
     """Gebiete, denen ein Bericht zugeordnet wird, und die Gebiete, die seine Schlagzeile selbst nennt."""
     named = gazetteer.find(title, language)
     fixed = query.get("area")
+    if fixed and areas.parent(fixed) == "AT" and named in ([], ["AT"]):
+        # Kein bekannter Ort oder nur "Österreich": Das Gemeindeverzeichnis weiß es oft genauer.
+        local = _austrian(fixed, title, lands)
+        if local and (not named or local != ["AT"]):
+            named = local
     if fixed and not named:
         # Schlagzeile ohne Ort: Die Suche ordnet sie zu. Eine weite Suche ("... Österreich") findet aber
         # auch Auslandsberichte heimischer Medien, dort zählt nur, was den Ort nennt.
@@ -331,8 +513,46 @@ def _remember(stories: dict, closed: dict, targets: list, when) -> None:
     keine neue Lage (so lange wie nach dem Ende einer Lage, siehe followup_days).
     """
     for area in targets:
-        if area not in stories:
+        # Auch neben einer Lage, die noch nicht zählt (ein einzelner Bericht ohne Ort): Sonst ginge die
+        # Vorgeschichte des Gebiets verloren.
+        if not (stories.get(area) or {}).get("active"):
             closed[area] = max(closed.get(area, ""), iso(when))
+
+
+def _label(query: dict) -> str:
+    """Kurzname einer Abfrage für Protokoll und Hinweis."""
+    if query.get("feed"):
+        return f"Feed {query.get('domain') or urlsplit(query['url']).netloc}"
+    return GOOGLE
+
+
+def _all_feeds(cursor: dict, context: dict) -> bool:
+    """Wahr bei Verdacht auf einen großen Ausfall in Europa: Dann kommen alle Feeds in jedem Lauf an die Reihe.
+
+    Der Verdacht besteht, wenn die Messquellen in Europa schweigen oder die Netzfrequenz ausschlägt (context
+    "wide"), oder sobald ein erstes Medium "Europa" als betroffen nennt.
+    """
+    return bool(context.get("wide")) or areas.EUROPE_WIDE in (cursor.get("stories") or {})
+
+
+def _plan(cfg: dict, cursor: dict, context: dict) -> list[dict]:
+    """Abfragen dieses Laufs: Vorrang-Suchen, Welt-Suchen und Feeds reihum, Nachweis-Suchen."""
+    plan = list(cfg.get("priority_queries") or [])
+    world = cfg.get("world_queries") or []
+    if world:
+        start = cursor.get("rotation", 0) % len(world)
+        plan += [world[(start + step) % len(world)] for step in range(min(cfg["world_per_run"], len(world)))]
+        cursor["rotation"] = (start + cfg["world_per_run"]) % len(world)
+    plan += [confirm_query(area) for area in (context.get("active_areas") or [])[: cfg["max_areas_per_run"]]]
+    feeds = cfg.get("feeds") or []
+    if feeds:
+        start = cursor.get("feed_rotation", 0) % len(feeds)
+        count = min(cfg.get("feeds_per_run", 0), len(feeds))
+        if count and _all_feeds(cursor, context):
+            count = len(feeds)
+        plan += [feed_query(feeds[(start + step) % len(feeds)]) for step in range(count)]
+        cursor["feed_rotation"] = (start + count) % len(feeds)
+    return plan
 
 
 def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
@@ -345,43 +565,48 @@ def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
     # Gebiete mit eigener Suche: dort reichen weniger Medien
     first_hand = {query["area"]: int(query.get("min_sources", cfg["priority_min_sources"]))
                   for query in fixed_queries if query.get("area")}
+    lands = frozenset(area for area in first_hand if area in areas.REGIONS)  # Bundesländer mit eigener Suche
 
-    plan = list(fixed_queries)
-    world = cfg.get("world_queries") or []
-    if world:
-        start = cursor.get("rotation", 0) % len(world)
-        plan += [world[(start + step) % len(world)] for step in range(min(cfg["world_per_run"], len(world)))]
-        cursor["rotation"] = (start + cfg["world_per_run"]) % len(world)
-    plan += [confirm_query(area) for area in (context.get("active_areas") or [])[: cfg["max_areas_per_run"]]]
-
+    plan = _plan(cfg, cursor, context)
     signals, errors = [], []
-    if not cursor.get("history"):
-        # Erster Lauf: eine Woche zurückschauen. Sonst zählt die Aufarbeitung eines Ausfalls aus den Tagen
-        # davor ("Staatsschutz ermittelt nach Stromausfall in Linz") als neuer Ausfall.
+    # Einmalig eine Woche zurückschauen. Sonst zählt die Aufarbeitung eines Ausfalls aus den Tagen davor
+    # ("Staatsschutz ermittelt nach Stromausfall in Linz") als neuer Ausfall. Der Merker heißt seit dem
+    # Gemeindeverzeichnis "lookback": Damit holt auch ein laufender Radar die Rückschau einmal nach.
+    lookback = not cursor.get("lookback")
+    if lookback:
         plan = [dict(query, days=cfg["followup_days"]) for query in fixed_queries] + plan
     failed = False
+    tried, broken = {GOOGLE: 0, FEEDS: 0}, {GOOGLE: 0, FEEDS: 0}
     for index, query in enumerate(plan):
-        if index and PAUSE_SECONDS:
+        path = FEEDS if query.get("feed") else GOOGLE
+        if index and PAUSE_SECONDS and path == GOOGLE:
             time.sleep(PAUSE_SECONDS)
         days = query.get("days", 1)
-        try:
-            items = fetch(f"{query['q']} when:{days}d", query.get("hl", "de"), query.get("gl", "AT"),
-                          query.get("ceid"))
-        except (HttpError, ET.ParseError) as err:
-            errors.append(f"Google News: {err}")
-            failed = failed or days > 1
-            continue
         language = query.get("hl", "de")
+        tried[path] += 1
+        try:
+            if path == FEEDS:
+                items = fetch_feed(query)
+            else:
+                items = fetch(f"{query['q']} when:{days}d", language, query.get("gl", "AT"), query.get("ceid"))
+        except (HttpError, ET.ParseError) as err:
+            errors.append(f"{_label(query)}: {err}")
+            broken[path] += 1
+            failed = failed or days > 1
+            # Ins Protokoll, damit sich nachzählen lässt, wie oft eine Abfrage abgewiesen wird.
+            log.warning("Medien: Abfrage fehlgeschlagen (%s%s): %s", _label(query),
+                        f", Gebiet {query['area']}" if query.get("area") else "", err)
+            continue
         if days > 1:
             for item in items:
                 if now - item["when"] > max_age and relevant(item["title"], language):
-                    _remember(stories, closed, _targets(query, item["title"], language)[0], item["when"])
+                    _remember(stories, closed, _targets(query, item["title"], language, lands)[0], item["when"])
             continue
         for item in sorted(items, key=lambda entry: entry["when"]):
             title = item["title"]
             if item["when"] > now + timedelta(minutes=10) or not relevant(title, language):
                 continue
-            targets, named = _targets(query, title, language)
+            targets, named = _targets(query, title, language, lands)
             if now - item["when"] > max_age:
                 _remember(stories, closed, targets, item["when"])  # zu alt, um etwas auszulösen
                 continue
@@ -418,10 +643,17 @@ def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
     for area in [area for area, last in closed.items() if now - parse_ts(last) > keep]:
         del closed[area]
 
-    if not cursor.get("history") and not failed:
-        cursor["history"] = iso(now)
+    if lookback and not failed:
+        cursor["lookback"] = iso(now)
+        cursor.pop("history", None)  # so hieß der Merker vor dem Gemeindeverzeichnis
     cursor["note"] = "; ".join(sorted(set(errors)))
+    cursor["degraded"] = ""
     if plan and len(errors) == len(plan):
         raise HttpError(cursor["note"])
+    # Fällt ein ganzer Weg aus, läuft der andere weiter. Der Ausfall soll trotzdem sichtbar sein: Die
+    # Suchen für Oberösterreich und Österreich laufen nur über Google News.
+    down = [path for path in (GOOGLE, FEEDS) if tried[path] and broken[path] == tried[path]]
+    if down:
+        cursor["degraded"] = f"{' und '.join(down)} ohne Antwort ({cursor['note']})"[:300]
     cursor["data_time"] = iso(now)
     return signals

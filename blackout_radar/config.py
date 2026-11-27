@@ -32,7 +32,13 @@ DEFAULTS: dict = {
         "update_interval_minutes": 60,    # Zwischenstand bei einem großen Ausfall im Vorrang-Gebiet
     },
     "daily_summary": {"enabled": True, "time": "07:00"},
-    "health": {"alert_after_hours": 3, "gap_minutes": 90},
+    "health": {
+        "alert_after_hours": 3, "gap_minutes": 90,
+        # Hosts der Messquellen in Europa. Antwortet keiner davon, während Quellen außerhalb Europas
+        # antworten, kommt eine eigene Warnung (siehe reach.py). Standorte gemessen am 27.11.2026.
+        "europe_hosts": ["api.energy-charts.info", "dat.netzfrequenzmessung.de", "www.linznetz.at"],
+        "europe_silent_minutes": 10,      # so lange müssen alle zugleich schweigen
+    },
     "notify": {
         "ntfy": {"enabled": True, "server": "https://ntfy.sh", "topic": "", "token": "", "skip_levels": []},
         "email": {"enabled": False, "host": "", "port": 587, "user": "", "password": "",
@@ -63,7 +69,9 @@ DEFAULTS: dict = {
             "refresh_hours": 30,           # so weit zurück wird laufend nachgeladen, einmal am Tag alles
         },
         "ioda": {
-            "enabled": False,  # Abfrage noch nicht gegen echte Daten geprüft (Dienst antwortete nicht)
+            # Abgeschaltet: Der Dienst nimmt die Verbindung an, antwortet automatischen Abfragen aber nicht
+            # (zweimal gemessen, zuletzt am 27.11.2026). Die Abfrage ist deshalb nie gegen echte Daten geprüft.
+            "enabled": False,
             "base_url": "https://api.ioda.inetintel.cc.gatech.edu/v2",
             "watch_countries": ["AT"],        # hier wird das Rohsignal direkt gemessen
             "watch_regions": {"AT-4": ["Oberösterreich", "Upper Austria", "Oberosterreich"]},
@@ -86,6 +94,9 @@ DEFAULTS: dict = {
             "big_sources": 6,              # ab so vielen Medien gilt ein Ausfall ohne Zahlenangabe als groß
             "world_per_run": 2,            # so viele Welt-Suchen je Lauf (reihum)
             "max_areas_per_run": 2,        # so viele Nachweis-Suchen je Lauf
+            # So viele Feeds je Lauf (reihum, jeder Feed etwa alle 25 Minuten). Bei Verdacht auf einen großen
+            # Ausfall in Europa kommen alle in jedem Lauf an die Reihe (news._all_feeds). 0 schaltet die Feeds ab.
+            "feeds_per_run": 4,
             "priority_queries": [
                 {"area": "AT-4", "hl": "de", "gl": "AT",
                  "q": "(Stromausfall OR Stromstörung OR \"ohne Strom\") "
@@ -113,6 +124,34 @@ DEFAULTS: dict = {
                  "q": "\"apagão nacional\" OR \"apagão geral\" OR \"grande apagão\" OR \"milhões sem energia\""},
                 {"hl": "it", "gl": "IT", "ceid": "IT:it",
                  "q": "\"maxi blackout\" OR \"blackout elettrico\" OR \"milioni senza corrente\""},
+            ],
+            # Welt-Nachrichten großer Medien außerhalb Europas, als zweiter Weg neben Google News. Alle
+            # antworteten dem Radar bei der Prüfung am 27.11.2026. domain ist der Name, unter dem das
+            # Medium gezählt wird (derselbe wie bei Google News, damit es nicht doppelt zählt).
+            "feeds": [
+                {"domain": "nytimes.com", "hl": "en", "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"},
+                {"domain": "aljazeera.com", "hl": "en", "url": "https://www.aljazeera.com/xml/rss/all.xml"},
+                {"domain": "abc.net.au", "hl": "en", "url": "https://www.abc.net.au/news/feed/51120/rss.xml"},
+                {"domain": "thehindu.com", "hl": "en",
+                 "url": "https://www.thehindu.com/news/international/feeder/default.rss"},
+                {"domain": "washingtonpost.com", "hl": "en", "url": "https://feeds.washingtonpost.com/rss/world"},
+                {"domain": "straitstimes.com", "hl": "en", "url": "https://www.straitstimes.com/news/world/rss.xml"},
+                {"domain": "cbc.ca", "hl": "en", "url": "https://www.cbc.ca/webfeed/rss/rss-world"},
+                {"domain": "uol.com.br", "hl": "pt", "url": "https://feeds.folha.uol.com.br/mundo/rss091.xml"},
+                {"domain": "cbsnews.com", "hl": "en", "url": "https://www.cbsnews.com/latest/rss/world"},
+                {"domain": "scmp.com", "hl": "en", "url": "https://www.scmp.com/rss/5/feed"},
+                {"domain": "smh.com.au", "hl": "en", "url": "https://www.smh.com.au/rss/world.xml"},
+                {"domain": "indiatimes.com", "hl": "en",
+                 "url": "https://timesofindia.indiatimes.com/rssfeeds/296589292.cms"},
+                {"domain": "go.com", "hl": "en", "url": "https://abcnews.go.com/abcnews/internationalheadlines"},
+                {"domain": "channelnewsasia.com", "hl": "en",
+                 "url": "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml&category=6311"},
+                {"domain": "npr.org", "hl": "en", "url": "https://feeds.npr.org/1004/rss.xml"},
+                {"domain": "clarin.com", "hl": "es", "url": "https://www.clarin.com/rss/mundo/"},
+                {"domain": "nbcnews.com", "hl": "en", "url": "https://feeds.nbcnews.com/nbcnews/public/news"},
+                {"domain": "japantimes.co.jp", "hl": "en", "url": "https://www.japantimes.co.jp/feed/"},
+                {"domain": "foxnews.com", "hl": "en", "url": "https://moxie.foxnews.com/google-publisher/world.xml"},
+                {"domain": "ndtv.com", "hl": "en", "url": "https://feeds.feedburner.com/ndtvnews-world-news"},
             ],
         },
     },

@@ -6,12 +6,13 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
-from . import areas
+from . import areas, reach
 from .collectors import frequency
 from .engine import Engine
 from .model import Message, fmt_duration, fmt_pct, iso, parse_ts
 from .model import fmt_number as number
 from .model import fmt_people as people
+from .notify import scrub, secrets
 
 SOURCE_NAMES = {
     "frequency": "Netzfrequenz",
@@ -19,7 +20,7 @@ SOURCE_NAMES = {
     "ioda": "Internet-Ausfälle (IODA)",
     "cloudflare": "Cloudflare Radar",
     "utility": "Störmeldungen LINZ NETZ",
-    "news": "Medien (Google News)",
+    "news": "Medien (Google News, Feeds aus Übersee)",
 }
 SOURCE_SHORT = {"frequency": "Netzfrequenz", "load": "Stromlast", "ioda": "IODA",
                 "cloudflare": "Cloudflare", "utility": "LINZ NETZ", "news": "Medien"}
@@ -33,11 +34,13 @@ BACKGROUND = """## Einordnung
 - **Brownout**: Spannung oder Versorgung wird abgesenkt oder Verbraucher werden gezielt abgeschaltet (Lastabwurf), um einen Blackout zu verhindern.
 - **Netzfrequenz**: Soll 50,00 Hz. Ab 49,8 Hz werden Reserven aktiviert, ab 49,0 Hz schaltet das Netz automatisch Verbraucher ab, bei 47,5 Hz trennen sich Kraftwerke vom Netz.
 - **Netzwiederaufbau Österreich**: Schwarzstartfähige Kraftwerke (vor allem Speicherkraftwerke) bauen Netzinseln auf, die Schritt für Schritt zusammengeschaltet werden. Richtwerte: Die APG nannte 2021 aus ihren Simulationen im besten Fall etwa 10 Stunden und längstens 20 bis 30 Stunden, bis die Versorgung wieder läuft. Eine Studie für das Parlament (2022) nennt 10 bis 24 Stunden bis zu einem voll versorgten Übertragungsnetz. Das sind Richtwerte und keine Prognose.
+- **Stromausfall in ganz Europa**: Der Radar läuft bei GitHub in den USA, auch Push-Dienst und Nachrichtenquellen stehen dort und laufen weiter. Die Messquellen (Netzfrequenz, Stromlast, Störmeldungen) stehen in Europa und können dann ausbleiben. Verstummen sie alle zugleich, meldet der Radar das eigens. Die Lage kommt dann aus Medienberichten aus Übersee.
 - **Grenzen dieser Übersicht**: Medienberichte belegen einen Ausfall, aber weder Dauer noch Ende. Lastdaten kommen je nach Land mit zwei bis fünf Stunden Verzögerung, die Zeiten daraus stimmen aber. Bei einem großen Ausfall können sie ganz ausbleiben, und rund um Feiertage sind Tiefe und Ende daraus ungenau. Betroffenenzahlen sind grobe Schätzungen (Zahlen aus Schlagzeilen oder Anteil mal Einwohner).
 """
 CREDITS = ("Datenquellen: Energy-Charts (Fraunhofer ISE, CC BY 4.0, energy-charts.info), "
-           "netzfrequenzmessung.de, Google News, Störmeldungen der LINZ NETZ GmbH, "
-           "optional IODA (Georgia Tech) und Cloudflare Radar.")
+           "netzfrequenzmessung.de, Google News, Nachrichten-Feeds von Medien in Amerika, Asien und Australien, "
+           "Störmeldungen der LINZ NETZ GmbH, optional Cloudflare Radar. "
+           "Gemeindeverzeichnis: STATISTIK AUSTRIA.")
 
 
 def md(text: str) -> str:
@@ -151,7 +154,8 @@ class Report:
                 continue
             entry, cursor = book.get(name) or {}, cursors.get(name) or {}
             if entry.get("fail_since"):
-                state = f"gestört seit {self.clock(parse_ts(entry['fail_since']))}"
+                kind = "eingeschränkt" if entry.get("partial") else "gestört"
+                state = f"{kind} seit {self.clock(parse_ts(entry['fail_since']))}"
                 note = entry.get("last_error") or ""
             elif entry.get("last_ok"):
                 state, note = "in Ordnung", cursor.get("note") or ""
@@ -160,6 +164,42 @@ class Report:
             rows.append({"name": name, "label": label, "ok": not entry.get("fail_since") and bool(entry.get("last_ok")),
                          "state": state, "data_time": cursor.get("data_time"), "note": note})
         return rows
+
+    def europe(self) -> dict:
+        """Erreichbarkeit der Messquellen in Europa (siehe reach.py)."""
+        return {"silent_since": iso(reach.silent_since(self.state)),
+                "hosts": reach.hosts(self.cfg, self.state, self.now)}
+
+    def europe_line(self) -> str | None:
+        """Hinweis für den Lagebericht, solange keine Messquelle in Europa antwortet."""
+        since = reach.silent_since(self.state)
+        if since is None:
+            return None
+        names = ", ".join(row["label"] for row in reach.hosts(self.cfg, self.state, self.now) if row["reached"] is False)
+        return (f"Seit {self.clock(since)} Uhr antwortet keine der Messquellen in Europa{f' ({names})' if names else ''}, "
+                "Quellen außerhalb Europas antworten. Das passt zu einem großflächigen Strom- oder Netzausfall in "
+                "Europa, kann aber auch eine gestörte Verbindung zwischen den USA und Europa sein.")
+
+    def notices(self, limit: int = 20) -> list[dict]:
+        """Die letzten Meldungen mit Text und Dringlichkeit, neueste zuerst.
+
+        Für die App: Sie vergleicht die Liste mit dem, was als Push ankam, und holt nach, was fehlt.
+        """
+        hidden = secrets(self.cfg["notify"])
+        rows = []
+        for item in self.state.get("outbox") or []:
+            message = item["message"]
+            rows.append({"key": message.get("key"), "t": item.get("queued_at"), "title": message["title"],
+                         "body": message.get("body", ""), "level": message.get("level"),
+                         "delivered": list(item.get("done") or []), "pending": list(item.get("pending") or [])})
+        for entry in self.state.get("sent") or []:
+            rows.append({"key": entry.get("key"), "t": entry.get("t"), "title": entry["title"],
+                         "body": entry.get("body", ""), "level": entry.get("level"),
+                         "delivered": list(entry.get("channels") or []), "pending": list(entry.get("failed") or [])})
+        for row in rows:  # Zugangsdaten stehen in keiner Meldung, die Datei ist aber öffentlich
+            row["title"], row["body"] = scrub(row["title"], hidden), scrub(row["body"], hidden)
+        rows.sort(key=lambda row: row["t"] or "", reverse=True)
+        return rows[:limit]
 
     # ---------------------------------------------------------------- Markdown
     def event_block(self, event) -> list[str]:
@@ -206,6 +246,9 @@ class Report:
         active, ended, watching = self.partition()
         lines = ["# Lagebericht Stromausfälle", "",
                  f"Stand: **{self.stamp()}** ({self.cfg.get('timezone', 'Europe/Vienna')})", "", "## Aktuell", ""]
+        silent = self.europe_line()
+        if silent:
+            lines += [f"⚠️ **{md(silent)}**", ""]
         if active:
             for event in active:
                 lines += self.event_block(event)
@@ -298,6 +341,7 @@ class Report:
             "watching": [brief(e) for e in watching],
             "figures": [{"label": label, "value": value} for label, value in self.figures()],
             "statistics": self.statistics(), "history": self.history()[:50], "sources": self.sources(),
+            "europe": self.europe(), "notices": self.notices(),
         }
 
     # ---------------------------------------------------- tägliche Zusammenfassung
@@ -333,8 +377,12 @@ class Report:
             lines.append(f"Unter Beobachtung: {len(watching)} kleinere oder unbestätigte Störungen weltweit.")
         lines += [f"{label}: {value}" for label, value in self.figures()
                   if label.startswith("Netzfrequenz") or label == f"Stromlast {areas.name('AT')}"]
+        silent = self.europe_line()
+        if silent:
+            lines.append(silent)
         sources = self.sources()
-        broken = [SOURCE_SHORT.get(row["name"], row["name"]) for row in sources if not row["ok"]]
+        broken = [SOURCE_SHORT.get(row["name"], row["name"]) + (" (eingeschränkt)" if "eingeschränkt" in row["state"] else "")
+                  for row in sources if not row["ok"]]
         if broken:
             lines.append(f"Datenquellen: {len(sources) - len(broken)} von {len(sources)} in Ordnung, gestört: "
                          + ", ".join(broken))

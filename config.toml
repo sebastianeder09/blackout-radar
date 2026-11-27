@@ -29,6 +29,10 @@
 [health]
 # alert_after_hours = 3           # Meldung, wenn eine Datenquelle so lange ausfällt
 # gap_minutes = 90                # Meldung, wenn so lange kein Lauf stattgefunden hat
+# europe_silent_minutes = 10      # Warnung, wenn so lange keine der Messquellen in Europa antwortet,
+#                                 # Quellen außerhalb Europas aber schon
+# europe_hosts = ["api.energy-charts.info", "dat.netzfrequenzmessung.de", "www.linznetz.at"]
+#                                 # die Messquellen in Europa. Leere Liste: keine solche Warnung
 
 [notify.ntfy]
 # server = "https://ntfy.sh"
@@ -56,6 +60,10 @@
 # world_min_sources = 3           # so viele verschiedene Medien müssen über einen Ausfall berichten
 # quiet_hours = 6                 # so lange ohne neuen Bericht, dann gilt die Lage als beendet
 # followup_days = 7               # so lange gelten Berichte über Ursache und Folgen danach als Aufarbeitung
+# feeds_per_run = 4               # so viele Nachrichten-Feeds aus Übersee je Lauf, reihum (0: Feeds abschalten).
+#                                 # Bei Verdacht auf einen großen Ausfall in Europa werden alle abgefragt.
+#                                 # Die 20 Feeds stehen in blackout_radar/config.py unter "feeds".
 
 [sources.ioda]
-# enabled = false                 # weltweite Internet-Ausfälle. Noch nicht gegen echte Daten geprüft.
+# enabled = false                 # weltweite Internet-Ausfälle. Der Dienst antwortet automatischen Abfragen
+#                                 # nicht (zuletzt gemessen am 27.11.2026) und bleibt deshalb abgeschaltet.

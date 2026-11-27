@@ -6,8 +6,9 @@
 # Ruhezustand (Doze), abgestürzter Dienst und Neustart des Handys. Testbau (debug) gegen einen
 # nachgestellten Server (android/test/fake_ntfy.py auf Port 8765): Anzeige bei einem Blackout.
 #
-# Was die App anzeigt, liest seite.py aus der Seite selbst (nicht aus dem Bildschirmfoto).
-# Ergebnisse (Bilder, Ablauf, Protokolle) landen in $OUT.
+# Was die App anzeigt, liest seite.py aus der Seite selbst. Ob das Bild am Handy einer Änderung
+# auch folgt, zeigt der Vergleich zweier Bildschirmfotos (Vorschau.java). Am Ende steht die Frage,
+# ob die App im Lauf abgestürzt ist. Ergebnisse (Bilder, Ablauf, Protokolle) landen in $OUT.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -24,7 +25,18 @@ RESULTS=()
 log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$OUT/ablauf.txt"; }
 ok() { log "OK: $*"; RESULTS+=("✅ $*"); }
 bad() { log "FEHLER: $*"; RESULTS+=("❌ $*"); FAILED=$((FAILED + 1)); }
-shot() { sleep "${2:-1}"; adb exec-out screencap -p > "$OUT/$1.png" && log "Bild $1"; }
+
+quiet_system() {  # Hinweise von Android, dass eine App hängt oder abgestürzt ist, liegen über allem: schließen und vermerken
+  local note
+  note=$(adb shell dumpsys window windows 2> /dev/null | tr -d '\r' | grep -oE 'Application (Not Responding|Error): [A-Za-z0-9._]+' | head -1)
+  [ -z "$note" ] && return 0
+  log "Hinweis von Android geschlossen: $note"
+  adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS > /dev/null 2>&1
+  sleep 2
+}
+
+snap() { adb exec-out screencap -p > "$OUT/$1.png" && log "Bild $1"; }  # Name: Bild, so wie es gerade ist
+shot() { sleep "${2:-1}"; quiet_system; snap "$1"; }  # Name [Wartezeit]: Bild der App, ohne fremde Hinweise darüber
 
 publish() {  # Titel Priorität Schlagworte Text
   curl -sS --retry 3 -H "Title: $1" -H "Priority: $2" -H "Tags: $3" -d "$4" "$NTFY/$TOPIC" > /dev/null \
@@ -71,11 +83,20 @@ layout() {  # Paket Name: Kopfzeile oben, Leiste unten, nichts ragt seitlich hin
   [[ "$verdict" == ok* ]]
 }
 
-painted() {  # Paket: wartet auf das nächste ganze Bild der Seite (bild.js) und meldet, ob eines kam
-  local answer
-  answer=$(page "$1" "$(cat "$HERE/bild.js")")
-  log "Zeichnen $1: ${answer:-nicht lesbar}, $(adb shell dumpsys gfxinfo "$1" | grep -m1 'Total frames rendered' | tr -d '\r')"
-  [[ "$answer" == Bild* ]]
+changed() {  # Bild1 Bild2 Von Bis: hat sich das Bild zwischen den beiden Höhen (Prozent von oben) geändert?
+  local verdict code
+  verdict=$(java -Djava.awt.headless=true "$HERE/Vorschau.java" vergleichen "$OUT/$1.png" "$OUT/$2.png" "$3" "$4" 2> "$OUT/vergleich-fehler.txt")
+  code=$?
+  log "Vergleich $1 mit $2: ${verdict:-nicht möglich, $(head -c 300 "$OUT/vergleich-fehler.txt" | tr '\n' ' ')}"
+  return $code
+}
+
+incidents() {  # Paket Datei: was Android über Abstürze und Hänger dieses Pakets festgehalten hat (bleibt über Neustarts erhalten)
+  local tag
+  for tag in data_app_crash data_app_native_crash data_app_anr; do
+    adb shell dumpsys dropbox --print "$tag" 2> /dev/null | tr -d '\r'
+  done > "$OUT/$2"
+  grep -F -A 25 "Process: $1" "$OUT/$2"
 }
 
 service_running() { adb shell dumpsys activity services "$1/.ListenerService" 2> /dev/null | grep -q "ServiceRecord"; }
@@ -121,12 +142,14 @@ layout "$DBG" "Testbau" && ok "Testbau: Kopfzeile und Leiste sitzen richtig" || 
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab meldungen > /dev/null
 page_has "$DBG" "Die App behält die letzten 300 Meldungen" && ok "Testbau: Liste der Meldungen angezeigt" || bad "Testbau: Liste der Meldungen fehlt"
 shot 11-blackout-meldungen
-# Eine Meldung kommt, während die Liste offen ist und niemand das Handy berührt.
+# Eine Meldung kommt, während die Liste offen ist und niemand das Handy berührt. Bis zum Bild fragt
+# auch der Test die Seite nicht, damit die Anzeige wirklich von selbst nachziehen muss.
 curl -sS -H "Title: Testbau live" -H "Priority: 4" -H "Tags: warning" -d "Zustellung im Testbau" http://127.0.0.1:8765/testthema > /dev/null
 if t=$(wait_notification "Testbau live" 40); then ok "Testbau: neue Meldung nach $t s als Benachrichtigung"; else bad "Testbau: neue Meldung nicht als Benachrichtigung"; fi
-page_has "$DBG" "Testbau live" && ok "Testbau: neue Meldung steht in der offenen Liste" || bad "Testbau: neue Meldung fehlt in der offenen Liste"
-painted "$DBG" && ok "Testbau: Anzeige wird ohne Berührung neu gezeichnet" || bad "Testbau: Anzeige wird nicht neu gezeichnet"
 shot 14-blackout-neue-meldung 7  # erst wenn der Hinweis von Android am oberen Rand wieder weg ist
+changed 11-blackout-meldungen 14-blackout-neue-meldung 30 90 \
+  && ok "Testbau: Bild der offenen Liste zieht von selbst nach" || bad "Testbau: Bild der offenen Liste bleibt stehen"
+page_has "$DBG" "Testbau live" && ok "Testbau: neue Meldung steht in der offenen Liste" || bad "Testbau: neue Meldung fehlt in der offenen Liste"
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
 page_has "$DBG" "Meldungen kommen sofort an" && ok "Testbau: Verbindung wird als bestehend angezeigt" || bad "Testbau: Anzeige der Verbindung stimmt nicht"
 shot 12-blackout-app
@@ -146,12 +169,11 @@ adb shell am start -W -a android.intent.action.VIEW -d "blackoutradar://abo/$TOP
 page_has "$PKG" "Meldung der letzten 12 Stunden" && ok "Einrichten per Link: Thema übernommen, vorhandene Meldung gefunden" \
   || bad "Einrichten per Link: Ergebnis nicht wie erwartet"
 shot 01-eingerichtet
-log "Vor dem Knopf: $(adb shell dumpsys gfxinfo "$PKG" | grep -m1 'Total frames rendered' | tr -d '\r')"
 page "$PKG" "document.querySelector('.result .btn.primary').click()" > /dev/null  # Knopf "Weiter"
+shot 02-lage 4  # bis zum Bild fragt der Test die Seite nicht weiter
+changed 01-eingerichtet 02-lage 15 90 && ok "Bild folgt dem Wechsel zur Lage von selbst" || bad "Bild bleibt nach dem Wechsel zur Lage stehen"
 page_has "$PKG" "Lagebericht des Blackout-Radars" && ok "Lagebericht des echten Radars geladen und angezeigt" \
   || bad "Lagebericht des echten Radars fehlt"
-painted "$PKG" && ok "Anzeige wird ohne Berührung neu gezeichnet" || bad "Anzeige wird nicht neu gezeichnet"
-shot 02-lage
 layout "$PKG" "fertige App" && ok "Kopfzeile und Leiste sitzen richtig" || bad "Aufbau der Seite stimmt nicht"
 
 for _ in $(seq 1 30); do service_running "$PKG" && break; sleep 1; done
@@ -162,8 +184,10 @@ publish "CI Alarm live" 5 rotating_light "Probe aus dem Emulator-Test: so kommt 
 if t=$(wait_notification "CI Alarm live" 60); then ok "Alarm über ntfy.sh nach $t s angekommen"; else bad "Alarm über ntfy.sh nicht angekommen"; fi
 adb shell dumpsys notification --noredact > "$OUT/benachrichtigungen-alarm.txt"
 grep -q "channel=alarm_laut" "$OUT/benachrichtigungen-alarm.txt" && ok "Alarm läuft über den lauten Alarm-Kanal" || bad "Alarm nicht im lauten Alarm-Kanal"
+quiet_system  # nicht erst beim Bild: Das Schließen würde die aufgezogene Leiste wieder einklappen
 adb shell cmd statusbar expand-notifications > /dev/null 2>&1
-shot 03-benachrichtigung 2
+sleep 2
+snap 03-benachrichtigung
 adb shell cmd statusbar collapse > /dev/null 2>&1
 
 # Funkloch: Meldung kommt, während das Handy kein Netz hat
@@ -234,12 +258,15 @@ shot 04-meldungen
 adb shell am start -n "$PKG/.MainActivity" --es tab app > /dev/null
 page_has "$PKG" "Meldungen kommen sofort an" && ok "Verbindung wird als bestehend angezeigt" || bad "Anzeige der Verbindung stimmt nicht"
 shot 05-app
-# Weitergeben an ein weiteres Handy: Android zeigt seine Auswahl mit der fertigen Nachricht.
+# Weitergeben an ein weiteres Handy: Karte mit dem Knopf, dann zeigt Android seine Auswahl mit der fertigen Nachricht.
+page_has "$PKG" "App und Thema weitergeben" && ok "Knopf zum Weitergeben an weitere Handys vorhanden" || bad "Knopf zum Weitergeben fehlt"
+page "$PKG" "[...document.querySelectorAll('h3')].find(h => h.textContent === 'Weitere Handys').scrollIntoView({ block: 'center' })" > /dev/null
+shot 05b-weitere-handys
 page "$PKG" "Native.share()" > /dev/null
 sleep 3
 adb shell dumpsys activity activities 2> /dev/null | grep -q "ChooserActivity" \
   && ok "Weitergeben öffnet die Auswahl von Android" || bad "Weitergeben öffnet die Auswahl von Android nicht"
-shot 06-weitergeben
+snap 06-weitergeben
 adb shell input keyevent KEYCODE_BACK
 adb shell am start -n "$PKG/.MainActivity" --es tab lage > /dev/null
 shot 07-lage 3
@@ -247,7 +274,30 @@ shot 07-lage 3
 adb logcat -d > "$OUT/logcat.txt" 2>&1
 adb shell dumpsys notification --noredact > "$OUT/benachrichtigungen.txt" 2>&1
 adb shell dumpsys activity services "$PKG" > "$OUT/dienste.txt" 2>&1
-rm -f "$OUT/seite-fehler.txt"
+rm -f "$OUT/seite-fehler.txt" "$OUT/vergleich-fehler.txt"
+
+# Ist die fertige App oder der Testbau im Lauf abgestürzt oder hängen geblieben?
+found=$(incidents "$PKG" abstuerze.txt)
+if ! grep -q "Drop box contents" "$OUT/abstuerze.txt"; then
+  bad "Abstürze nicht prüfbar: Android gibt seine Aufzeichnungen nicht heraus"
+elif [ -n "$found" ]; then
+  bad "Die App ist im Lauf abgestürzt oder hängen geblieben"
+  head -60 <<< "$found"
+else
+  ok "Kein Absturz und kein Hänger der App im ganzen Lauf"
+fi
+# Gegenprobe: Ein erzwungener Absturz des Testbaus muss in denselben Aufzeichnungen auftauchen,
+# sonst wäre die Prüfung darüber nichts wert.
+adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
+sleep 2
+adb shell am crash "$DBG" > /dev/null 2>&1
+seen=""
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  sleep 2
+  incidents "$DBG" gegenprobe.txt > /dev/null && seen=ja && break
+done
+[ -n "$seen" ] && ok "Gegenprobe: ein erzwungener Absturz wird erkannt" \
+  || bad "Gegenprobe: erzwungener Absturz nicht erkannt, die Absturzprüfung ist nicht verlässlich"
 
 {
   echo "## Emulator-Test, Android API $SDK"

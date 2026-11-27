@@ -54,11 +54,11 @@ Das Thema wirkt wie ein Passwort: Wer es kennt, kann mitlesen und selbst Meldung
 | `app/src/debug/` | nur im Testbau: Einrichten per `adb`, unverschlüsselte Verbindung zum nachgestellten Server |
 | `test/emulator.sh` | Emulator-Test: fertige App gegen ntfy.sh, Testbau gegen den nachgestellten Server `fake_ntfy.py` mit Testdaten aus dem Planspiel (`fixtures.py`) |
 | `test/seite.py` | liest im Emulator, was die App gerade anzeigt, und kann Knöpfe drücken (über die Entwickler-Schnittstelle der WebView) |
-| `test/Vorschau.java` | schreibt die Bildschirmfotos verkleinert ins Protokoll und holt sie dort wieder heraus |
+| `test/Vorschau.java` | schreibt die Bildschirmfotos verkleinert ins Protokoll, holt sie dort wieder heraus und vergleicht zwei Bilder |
 
 Bauen: `cd android && gradle assembleRelease` (Gradle 8.14, JDK 17, Android SDK 35). Tests: `gradle testDebugUnitTest`.
 
-Bei jeder Änderung unter `android/` baut GitHub Actions die App (`.github/workflows/android.yml`), führt die Tests aus und prüft sie in zwei Emulatoren (Android 12 und 15) gegen das echte ntfy.sh: Einrichten per Link, Lagebericht, Alarm, Funkloch, Ruhezustand, hart beendete App und Neustart. Nach dem Zusammenführen in `main` erscheint die neue Fassung unter *Releases*.
+Bei jeder Änderung unter `android/` baut GitHub Actions die App (`.github/workflows/android.yml`), führt die Tests aus und prüft sie in zwei Emulatoren (Android 12 und 15) gegen das echte ntfy.sh: Einrichten per Link, Lagebericht, Alarm, Funkloch, Ruhezustand, hart beendete App, Neustart und Weitergeben. Zwei Bildvergleiche zeigen, dass die Anzeige einer Änderung von selbst folgt. Am Ende fragt der Lauf Android, ob die App abgestürzt oder hängen geblieben ist, und prüft mit einem erzwungenen Absturz des Testbaus, dass diese Frage auch anschlägt. Nach dem Zusammenführen in `main` erscheint die neue Fassung unter *Releases*.
 
 Die Bildschirmfotos des Emulators liegen in voller Größe als Artefakt `emulator-api-<Nummer>` beim Lauf. In Pull Requests stehen sie zusätzlich verkleinert im Protokoll (Schritt "Bilder verkleinert ins Protokoll"). So holt man sie heraus:
 

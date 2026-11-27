@@ -4,8 +4,9 @@
 # Fertige App (release) gegen das echte ntfy.sh, auf einem Zufallsthema nur für diesen Lauf:
 # Einrichten per Link, Lagebericht des echten Radars, Zustellung eines Alarms, Funkloch,
 # Ruhezustand (Doze), abgestürzter Dienst und Neustart des Handys. Testbau (debug) gegen einen
-# nachgestellten Server (android/test/fake_ntfy.py auf Port 8765): Anzeige bei einem Blackout und
-# Einrichten ohne Netz.
+# nachgestellten Server (android/test/fake_ntfy.py auf Port 8765): Einrichten aus der kopierten
+# Nachricht eines anderen Handys, Anzeige bei einem Blackout, der Notweg über den Lagebericht
+# (Radar wird eine Meldung nicht los, falsches Thema, ntfy fällt aus) und Einrichten ohne Netz.
 #
 # Was die App anzeigt, liest seite.py aus der Seite selbst. Ob das Bild am Handy einer Änderung
 # auch folgt, zeigt der Vergleich zweier Bildschirmfotos (Vorschau.java). Am Ende steht die Frage,
@@ -91,9 +92,41 @@ wait_page() {  # Paket Text Sekunden -> gibt die Wartezeit in Sekunden aus, soba
   return 1
 }
 
-setup_debug() {  # richtet den Testbau am nachgestellten Server ein -> Antwort der App, siehe DebugReceiver
-  adb shell am broadcast -n "$DBG/$PKG.DebugReceiver" --es ziel http://10.0.2.2:8765/testthema --es status http://10.0.2.2:8765 \
-    2> /dev/null | tr -d '\r' | sed -n 's/.*data="\(.*\)".*/\1/p'
+debug_app() {  # Angaben für den DebugReceiver des Testbaus -> Antwort der App (data="…"), siehe DebugReceiver
+  adb shell am broadcast -n "$DBG/$PKG.DebugReceiver" "$@" 2> /dev/null | tr -d '\r' | sed -n 's/.*data="\(.*\)".*/\1/p'
+}
+
+setup_debug() {  # richtet den Testbau am nachgestellten Server ein -> Antwort der App
+  debug_app --es ziel http://10.0.2.2:8765/testthema --es status http://10.0.2.2:8765
+}
+
+reconcile() {  # Der Testbau gleicht den Lagebericht jetzt ab -> Zahl der Meldungen, die über den Notweg kamen
+  local answer
+  answer=$(debug_app --ez abgleich true)
+  if [[ "$answer" =~ abgleich=([0-9]+)$ ]]; then echo "${BASH_REMATCH[1]}"; else echo "keine Zahl (${answer:-keine Antwort})"; fi
+}
+
+radar() {  # Pfad JSON: spricht mit dem nachgestellten Radar und seinem ntfy (fake_ntfy.py) -> Antwort
+  curl -sS -H "Content-Type: application/json" -d "$2" "http://127.0.0.1:8765/$1"
+}
+
+cards() {  # Titel [Text]: Zahl der Karten mit diesem Titel (und diesem Text) in der Liste der Meldungen des Testbaus
+  page "$DBG" "[...document.querySelectorAll('.msg')].filter(c => c.querySelector('h4').textContent.includes('$1') && c.textContent.includes('${2:-}')).length"
+}
+
+notifications() {  # Titel: Zahl der Benachrichtigungen mit diesem Titel
+  adb shell dumpsys notification --noredact 2> /dev/null | grep -c "android.title=.*$1"
+}
+
+channel_of() {  # Titel -> Kanal, über den die Benachrichtigung mit diesem Titel läuft
+  adb shell dumpsys notification --noredact 2> /dev/null | python3 -c '
+import re, sys
+for block in sys.stdin.read().split("NotificationRecord(")[1:]:
+    if sys.argv[1] in block:
+        found = re.search(r"channel=([A-Za-z0-9_]+)", block)
+        print(found.group(1) if found else "unbekannt")
+        break
+' "$1"
 }
 
 layout() {  # Paket Name: Kopfzeile oben, Leiste unten, nichts ragt seitlich hinaus (aufbau.js)
@@ -170,6 +203,26 @@ log "Bildschirm: $(adb shell wm size | tr -d '\r' | tr '\n' ' ')$(adb shell wm d
 adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
 page_has "$DBG" "Alarme auf dieses Handy holen" && ok "Testbau: Einrichten wird angezeigt" || bad "Testbau: Einrichten fehlt"
 shot 00-einrichten
+# Ein weiteres Handy einrichten: Die weitergegebene Nachricht liegt in der Zwischenablage, so als hätte sie jemand
+# im Messenger kopiert. Wechselt der Mensch danach in die App, steht das Thema schon im Feld. Verbinden tippt er
+# selbst. Der Lagebericht kommt dabei schon vom nachgestellten Server, nicht von GitHub.
+debug_app --es status http://10.0.2.2:8765 > /dev/null
+adb shell input keyevent KEYCODE_HOME
+sleep 2
+log "Zwischenablage: $(debug_app --es zwischenablage http://10.0.2.2:8765/testthema)"
+adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
+field=""
+wait_page "$DBG" "Aus der kopierten Nachricht übernommen" 20 > /dev/null && field=$(page "$DBG" "document.getElementById('topic').value")
+[ "$field" = "http://10.0.2.2:8765/testthema" ] && ok "Testbau: Thema aus der kopierten Nachricht steht von selbst im Feld" \
+  || bad "Testbau: Thema aus der kopierten Nachricht nicht übernommen (im Feld: \"$field\")"
+shot 00b-einrichten-kopiert 7  # erst wenn der Hinweis von Android zum Kopieren wieder weg ist
+page "$DBG" "document.getElementById('connect').click()" > /dev/null
+connected=nein
+for _ in $(seq 1 20); do
+  [ "$(page "$DBG" "!!document.querySelector('.result')")" = true ] && connected=ja && break
+  sleep 2
+done
+[ "$connected" = ja ] && ok "Testbau: danach genügt ein Tipp auf Verbinden" || bad "Testbau: Verbinden mit dem übernommenen Thema hat nicht geklappt"
 # Kurz nach dem Start hat der Emulator manchmal noch kein Netz. Die Anzeige bei einem Blackout braucht den
 # nachgestellten Server, deshalb richtet der Test ein, bis der Server geantwortet hat, und vermerkt jede Antwort.
 # Was die App tut, wenn beim Einrichten kein Netz da ist, prüft weiter unten ein eigener Schritt.
@@ -198,8 +251,81 @@ shot 14-blackout-neue-meldung 7  # erst wenn der Hinweis von Android am oberen R
 changed 11-blackout-meldungen 14-blackout-neue-meldung 30 90 \
   && ok "Testbau: Bild der offenen Liste zieht von selbst nach" || bad "Testbau: Bild der offenen Liste bleibt stehen"
 page_has "$DBG" "Testbau live" && ok "Testbau: neue Meldung steht in der offenen Liste" || bad "Testbau: neue Meldung fehlt in der offenen Liste"
+
+# ------------------------------------------------------------ Testbau: Notweg
+# Der Radar führt im Lagebericht, was er verschickt hat. Kommt davon etwas nicht über ntfy an, zeigt die App es
+# selbst an und läutet. Hinter dem nachgestellten Server läuft dafür der echte Versand des Radars mit seinem
+# Postausgang (fake_ntfy.py), der Lagebericht stammt also aus demselben Code wie im Betrieb.
+n=$(reconcile)
+[ "$n" = 0 ] && ok "Notweg: was vor dem Einrichten im Lagebericht stand, läutet nicht" || bad "Notweg: Abgleich ohne neue Meldung ergab $n statt 0"
+
+# 1. Der Radar wird eine Meldung bei ntfy nicht los. Die App holt sie aus dem Lagebericht, so laut wie über ntfy.
+radar schalter '{"radar_erreicht_ntfy": false}' > /dev/null
+log "Radar: $(radar radar/meldung '{"title": "Notweg Alarm", "body": "Probe aus dem Emulator-Test: Diese Meldung wurde der Radar bei ntfy nicht los.", "level": "alarm"}')"
+n=$(reconcile)
+[ "$n" = 1 ] && ok "Notweg: Meldung, die der Radar nicht loswurde, aus dem Lagebericht geholt" || bad "Notweg: Abgleich ergab $n statt 1"
+if wait_notification "Notweg Alarm" 20 > /dev/null; then ok "Notweg: Alarm als Benachrichtigung"; else bad "Notweg: Alarm nicht als Benachrichtigung"; fi
+channel=$(channel_of "Notweg Alarm")
+[ "$channel" = alarm_laut ] && ok "Notweg: Alarm läuft über den lauten Alarm-Kanal" || bad "Notweg: Alarm läuft über den Kanal \"$channel\" statt über den lauten Alarm-Kanal"
+page_has "$DBG" "Der Radar konnte diese Meldung nicht an ntfy übergeben" && ok "Notweg: Liste zeigt die Meldung mit dem Grund" || bad "Notweg: Meldung oder Grund fehlt in der Liste"
+shot 16-notweg-meldung 7  # erst wenn der Hinweis von Android am oberen Rand wieder weg ist
+n=$(reconcile)
+[ "$n" = 0 ] && ok "Notweg: dieselbe Meldung läutet beim nächsten Abgleich nicht noch einmal" || bad "Notweg: zweiter Abgleich ergab $n statt 0"
+
+# 2. Im nächsten Lauf wird der Radar die Meldung doch noch los, mit seinem Vermerk "Verspätet zugestellt".
+#    Sie tritt still an die Stelle des Eintrags: Geläutet hat es dafür schon.
+radar schalter '{"radar_erreicht_ntfy": true}' > /dev/null
+log "Radar: $(radar radar/lauf '{"minuten_spaeter": 25}')"
+if t=$(wait_page "$DBG" "Verspätet zugestellt, erstellt am" 40); then ok "Notweg: spätere Zustellung über ntfy nach $t s in der Liste"; else bad "Notweg: spätere Zustellung über ntfy kam nicht an"; fi
+[ "$(cards "Notweg Alarm")" = 1 ] && [ "$(cards "Notweg Alarm" "Über den Notweg")" = 0 ] \
+  && ok "Notweg: spätere Zustellung ersetzt den Eintrag, nichts steht doppelt" \
+  || bad "Notweg: nach der späteren Zustellung $(cards "Notweg Alarm") Karten, davon $(cards "Notweg Alarm" "Über den Notweg") vom Notweg"
+count=$(notifications "Notweg Alarm")
+[ "$count" = 1 ] && ok "Notweg: spätere Zustellung läutet nicht noch einmal" || bad "Notweg: $count Benachrichtigungen statt 1 nach der späteren Zustellung"
+n=$(reconcile)
+[ "$n" = 0 ] && ok "Notweg: nach der Zustellung fehlt nichts mehr" || bad "Notweg: Abgleich nach der Zustellung ergab $n statt 0"
+
+# 3. Das Thema stimmt nicht: Der Radar stellt zu, aber nicht unter dem Thema dieses Handys.
+radar schalter '{"thema_des_radars": "anderes-thema"}' > /dev/null
+log "Radar: $(radar radar/meldung '{"title": "Notweg Thema", "body": "Probe aus dem Emulator-Test: Diese Meldung ging an ein anderes Thema.", "level": "warn"}')"
+radar schalter '{"thema_des_radars": "testthema"}' > /dev/null
+n=$(reconcile)
+[ "$n" = 1 ] && page_has "$DBG" "unter dem Thema dieses Handys lag die Meldung dort aber nicht" \
+  && ok "Notweg: Meldung unter fremdem Thema geholt, Liste weist auf das Thema hin" || bad "Notweg: Meldung unter fremdem Thema nicht geholt (Abgleich $n)"
+
+# 4. Gegenprobe: Eine Meldung, die wie gewohnt über ntfy ankommt, löst keinen Notweg aus.
+log "Radar: $(radar radar/meldung '{"title": "Ohne Notweg", "body": "Probe aus dem Emulator-Test: Diese Meldung kam wie gewohnt.", "level": "info"}')"
+if wait_notification "Ohne Notweg" 30 > /dev/null; then ok "Notweg: gewöhnliche Meldung kommt über ntfy"; else bad "Notweg: gewöhnliche Meldung kam nicht über ntfy"; fi
+n=$(reconcile)
+[ "$n" = 0 ] && [ "$(cards "Ohne Notweg")" = 1 ] && [ "$(cards "Ohne Notweg" "Über den Notweg")" = 0 ] \
+  && ok "Notweg: angekommene Meldung bleibt, wie sie ist" || bad "Notweg: angekommene Meldung wurde noch einmal geholt (Abgleich $n)"
+
+# 5. ntfy fällt aus, der Lagebericht bleibt erreichbar. Niemand stößt den Abgleich an: Die App muss von selbst
+#    im Lagebericht nachsehen. Der letzte Abgleich gilt dafür als lange her, sonst wartete sie den Mindestabstand ab.
+radar schalter '{"handy_erreicht_ntfy": false}' > /dev/null
+log "Radar: $(radar radar/meldung '{"title": "Notweg von selbst", "body": "Probe aus dem Emulator-Test: ntfy war für das Handy nicht erreichbar.", "level": "alarm"}')"
+debug_app --ez ausgeruht true > /dev/null
+if t=$(wait_notification "Notweg von selbst" 240); then ok "Notweg: ntfy ausgefallen, App alarmiert nach $t s von selbst"; else bad "Notweg: ntfy ausgefallen, App hat nicht von selbst alarmiert"; fi
+page_has "$DBG" "ntfy war von diesem Handy aus nicht erreichbar" && ok "Notweg: Liste nennt den Ausfall von ntfy als Grund" || bad "Notweg: Grund für den Ausfall von ntfy fehlt"
+quiet_system
+adb shell cmd statusbar expand-notifications > /dev/null 2>&1
+sleep 2
+snap 17-notweg-benachrichtigung
+adb shell cmd statusbar collapse > /dev/null 2>&1
+# ntfy ist wieder da. Die App zu öffnen drängt sie zum nächsten Versuch. Die Meldung von ntfy ersetzt den Eintrag still.
+radar schalter '{"handy_erreicht_ntfy": true}' > /dev/null
+adb shell am start -n "$DBG/$PKG.MainActivity" --es tab meldungen > /dev/null
+replaced=nein
+for _ in $(seq 1 30); do
+  [ "$(cards "Notweg von selbst" "Über den Notweg")" = 0 ] && replaced=ja && break
+  sleep 2
+done
+[ "$replaced" = ja ] && [ "$(cards "Notweg von selbst")" = 1 ] && [ "$(notifications "Notweg von selbst")" = 1 ] \
+  && ok "Notweg: ntfy wieder da, Meldung kommt nach und läutet nicht noch einmal" \
+  || bad "Notweg: nach der Rückkehr von ntfy $(cards "Notweg von selbst") Karten und $(notifications "Notweg von selbst") Benachrichtigungen statt je 1"
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
 page_has "$DBG" "Meldungen kommen sofort an" && ok "Testbau: Verbindung wird als bestehend angezeigt" || bad "Testbau: Anzeige der Verbindung stimmt nicht"
+page_has "$DBG" "bereit · Abgleich" && ok "Testbau: Notweg wird als bereit angezeigt" || bad "Testbau: Anzeige des Notwegs stimmt nicht"
 shot 12-blackout-app
 adb shell cmd uimode night yes > /dev/null
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab lage > /dev/null
@@ -319,6 +445,13 @@ snap 06-weitergeben
 adb shell input keyevent KEYCODE_BACK
 adb shell am start -n "$PKG/.MainActivity" --es tab lage > /dev/null
 shot 07-lage 3
+# Das App-Symbol, so wie Android es zeichnet: In den App-Infos der Einstellungen steht es oben in der Mitte.
+# Der Ausschnitt davon bleibt auch verkleinert im Protokoll erkennbar.
+adb shell am start -W -a android.settings.APPLICATION_DETAILS_SETTINGS -d "package:$PKG" > /dev/null 2>&1
+shot 08-app-infos 3
+java -Djava.awt.headless=true "$HERE/Vorschau.java" ausschnitt "$OUT/08-app-infos.png" "$OUT/08b-app-symbol.png" 20 5 60 45 2> /dev/null \
+  && log "Bild 08b-app-symbol" || log "Ausschnitt mit dem App-Symbol nicht möglich"
+adb shell input keyevent KEYCODE_HOME
 
 # ------------------------------------------------- Testbau: Einrichten ohne Netz
 # Die App merkt sich das Thema, verbindet sich, sobald das Netz da ist, und holt dann nach, was der Server von

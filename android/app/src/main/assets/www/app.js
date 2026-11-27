@@ -48,10 +48,11 @@
     wifi: '<svg viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5 12.9a10 10 0 0 1 14 0"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/></svg>',
     share: '<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></svg>',
   };
-  const LOGO = '<svg class="logo" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="12" fill="#0D1B2A"/>' +
-    '<circle cx="24" cy="24" r="17.6" fill="none" stroke="#3D6B8E" stroke-width="1.5"/>' +
-    '<circle cx="24" cy="24" r="10.9" fill="none" stroke="#2B4D68" stroke-width="1.5"/>' +
-    '<path d="M26.4 9.5 16.1 25.8h6.7l-2.4 12.7 11.5-16.4h-7z" fill="#FFC83D"/></svg>';
+  // Dasselbe Zeichen wie das App-Symbol (res/drawable/ic_launcher_foreground.xml), als Kachel mit runden Ecken.
+  const LOGO = '<svg class="logo" viewBox="14 14 80 80" aria-hidden="true"><rect x="14" y="14" width="80" height="80" rx="20" fill="#E1F0FF"/>' +
+    '<path d="M24,54 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0" fill="none" stroke="#008FFF" stroke-width="2.4" stroke-opacity="0.22"/>' +
+    '<path d="M31.5,54 a22.5,22.5 0 1,0 45,0 a22.5,22.5 0 1,0 -45,0" fill="#D4EAFF"/>' +
+    '<path d="M57.28,34.32 L43.34,56.46 L52.36,56.46 L49.08,73.68 L64.66,51.54 L55.23,51.54 Z" fill="#008FFF" stroke="#008FFF" stroke-width="2.6" stroke-linejoin="round"/></svg>';
 
   const LEVEL_NAME = { alarm: 'Alarm', warn: 'Warnung', ok: 'Entwarnung', info: 'Meldung', daily: 'Übersicht' };
   const OPEN_DEFAULT = { 'Laufende Ereignisse': true, 'Kürzlich beendet': true };
@@ -317,15 +318,18 @@
     const active = s.active || [];
 
     const stale = age >= STALE_MS;
-    const hero = el('div', { class: 'hero ' + (active.length ? 'alarm' : stale ? 'stale' : 'ok') });
+    // Antwortet keine Messquelle in Europa mehr, heißt "nichts erkannt" nicht mehr "alles in Ordnung".
+    const silent = europeSilent(s);
+    const hero = el('div', { class: 'hero ' + (active.length ? 'alarm' : stale ? 'stale' : silent ? 'warn' : 'ok') });
     const title = active.length
       ? (active.length === 1 ? (active[0].kind === 'frequency' ? 'Laufende Störung' : 'Laufender Stromausfall')
         : active.length + ' laufende Ereignisse')
-      : stale ? 'Zuletzt keine größeren Stromausfälle' : 'Keine größeren Stromausfälle erkannt';
+      : stale ? 'Zuletzt keine größeren Stromausfälle'
+        : silent ? 'Lage unklar: Messquellen in Europa antworten nicht' : 'Keine größeren Stromausfälle erkannt';
     let stand = 'Stand ' + when(generated, now) + ' · ' + ago(age);
     if (st.status.loading) stand += ' · wird aktualisiert';
     hero.append(el('div', { class: 'hero-head' },
-      el('span', { class: 'hero-icon' }, icon(active.length ? 'alert' : 'shield')),
+      el('span', { class: 'hero-icon' }, icon(active.length || (silent && !stale) ? 'alert' : 'shield')),
       el('div', null, el('h2', { text: title }), el('div', { class: 'stand', text: stand }))));
     if (active.length) {
       const list = el('ul', { class: 'events' });
@@ -341,6 +345,17 @@
 
     if (st.status.error) {
       v.append(note('info', 'wifi', st.status.error + ' Gezeigt wird der Stand von ' + when(generated, now) + '.'));
+    }
+    // Verstummen alle Messquellen in Europa zugleich, kann das selbst das Zeichen eines großen Ausfalls sein.
+    // Der Wortlaut folgt dem Lagebericht des Radars, der diesen Hinweis unter "Aktuell" führt.
+    if (silent) {
+      const quiet = ((s.europe || {}).hosts || []).filter(h => h.reached === false && h.label).map(h => h.label);
+      v.append(note('warn', 'alert', [
+        el('p', null,
+          el('b', { text: 'Seit ' + when(silent, now) + ' antwortet keine der Messquellen in Europa.' }),
+          (quiet.length ? ' Still sind: ' + quiet.join(', ') + '.' : '') +
+          ' Quellen außerhalb Europas antworten. Das passt zu einem großflächigen Strom- oder Netzausfall in Europa, ' +
+          'kann aber auch eine gestörte Verbindung zwischen den USA und Europa sein.')]));
     }
     if (stale) {
       v.append(note('warn', 'alert', [
@@ -373,6 +388,11 @@
       el('summary', { text: summary }), content);
     d.addEventListener('toggle', () => { S.open['more:' + key] = d.open; });
     return d;
+  }
+
+  /** Seit wann keine Messquelle in Europa mehr antwortet (Millisekunden), sonst 0. */
+  function europeSilent(s) {
+    return s && s.europe && s.europe.silent_since ? (Date.parse(s.europe.silent_since) || 0) : 0;
   }
 
   function note(kind, ico, content) {
@@ -411,6 +431,8 @@
   /** Setzt status.md in Abschnitte zum Auf- und Zuklappen um. */
   function renderReport(v, md) {
     const lines = md.replace(/\r/g, '').split('\n');
+    const silent = europeSilent(S.status);
+    let current = '';     // Überschrift des aktuellen Abschnitts, so wie sie im Lagebericht steht
     let body = null;      // Inhalt des aktuellen Abschnitts
     let target = null;    // aktueller Block darin (Ereignis oder Unterabschnitt)
     const into = () => target || body;
@@ -420,6 +442,7 @@
       if (/^# /.test(line) || /^Stand: /.test(line)) { i++; continue; }
       if (/^## /.test(line)) {
         let title = line.slice(3).trim();
+        current = title;
         // "Aktuell" ohne laufende Ereignisse sagt nur, was oben schon steht.
         if (title === 'Aktuell') {
           if (!(S.status && (S.status.active || []).length)) {
@@ -458,6 +481,8 @@
         continue;
       }
       if (!line.trim()) { i++; continue; }
+      // Dass die Messquellen in Europa verstummt sind, steht schon oben auf der Seite.
+      if (silent && current === 'Aktuell' && line.indexOf('⚠') === 0 && line.indexOf('Messquellen in Europa') > 0) { i++; continue; }
       // Absatz: Zeilen, die mit zwei Leerzeichen enden, behalten ihren Umbruch.
       const p = el('p');
       let br = false;
@@ -545,7 +570,9 @@
     const st = S.st;
     if (st.conn.state !== 'connected') {
       v.append(note('warn', 'wifi', 'Gerade keine Verbindung zu ntfy. Was in der Zwischenzeit kommt, ' +
-        'holt die App nach, sobald die Verbindung wieder steht.'));
+        'holt die App nach, sobald die Verbindung wieder steht.' +
+        // Der Notweg läuft nur, wenn der Radar seine Meldungen im Lagebericht führt.
+        (st.fallback && st.fallback.ready ? ' Bis dahin sieht sie alle paar Minuten im Lagebericht nach (Notweg).' : '')));
     }
     if (!S.msgs.length) {
       v.append(el('div', { class: 'empty' }, icon('bell'),
@@ -593,9 +620,12 @@
     else if (/^https?:\/\//.test(m.click || '')) actions.append(el('button', { class: 'link-btn', text: 'Link öffnen', onclick: () => N.openUrl(m.click) }));
     return el('article', { class: 'msg lvl-' + m.level },
       el('div', { class: 'msg-head' }, el('span', { text: clock(m.time * 1000) }),
-        el('span', { class: 'badge', text: LEVEL_NAME[m.level] || 'Meldung' })),
+        el('span', { class: 'badge', text: LEVEL_NAME[m.level] || 'Meldung' }),
+        m.via ? el('span', { class: 'badge way', text: 'Notweg' }) : null),
       el('h4', { text: (m.symbols ? m.symbols + ' ' : '') + (m.title || 'Blackout-Radar') }),
       body,
+      // Kam die Meldung nicht über ntfy, steht hier, warum die App sie aus dem Lagebericht geholt hat.
+      m.via ? el('p', { class: 'msg-way', text: m.viaText || 'Über den Notweg aus dem Lagebericht.' }) : null,
       actions.childNodes.length ? actions : null);
   }
 
@@ -624,8 +654,14 @@
       el('p', { class: 'small muted', text: (state[2] || '') + retry }),
       el('div', { class: 'kv-plain' }, el('span', { text: 'Server' }), el('span', { text: st.server.replace(/^https?:\/\//, '') })),
       el('div', { class: 'kv-plain' }, el('span', { text: 'Thema' }), el('span', { class: 'mono', text: st.topic })),
+      el('div', { class: 'kv-plain' }, el('span', { text: 'Notweg' }), el('span', { text: fallbackState(st.fallback, now) })),
       c.state === 'connected' ? null : el('div', { class: 'stack' },
-        el('button', { class: 'btn', onclick: () => { N.reconnect(); toast('Verbindung wird neu aufgebaut …'); } }, icon('refresh'), 'Jetzt neu verbinden'))));
+        el('button', { class: 'btn', onclick: () => { N.reconnect(); toast('Verbindung wird neu aufgebaut …'); } }, icon('refresh'), 'Jetzt neu verbinden')),
+      more('notweg', 'Was ist der Notweg?',
+        el('ul', null,
+          el('li', { text: 'Der Radar führt im Lagebericht bei GitHub, welche Meldungen er verschickt hat. Die App vergleicht das etwa alle 15 Minuten mit dem, was über ntfy angekommen ist. Erreicht sie ntfy nicht, sieht sie etwa alle 5 Minuten nach.' }),
+          el('li', { text: 'Fehlt eine Meldung, holt die App sie aus dem Lagebericht und meldet sich selbst, mit derselben Dringlichkeit. In der Liste trägt sie dann das Kennzeichen „Notweg“.' }),
+          el('li', { text: 'Das hilft, wenn ntfy ausfällt, wenn der Radar dort nichts loswird oder wenn das Thema an diesem Handy nicht stimmt. Der Notweg ist langsamer als der Push: meist einige Minuten, im ungünstigen Fall rund 20 Minuten. Ohne Internet am Handy hilft auch er nicht.' })))));
 
     // Erlaubnisse
     const p = st.perms;
@@ -679,7 +715,8 @@
     v.append(el('div', { class: 'card' },
       el('h3', { text: 'Weitere Handys' }),
       el('p', { class: 'small muted', text: 'Die App läuft auf beliebig vielen Handys. Die Nachricht enthält den Download und das Thema. ' +
-        'Am anderen Handy die App installieren, die Nachricht kopieren und in der App auf „Einfügen“ tippen.' }),
+        'Am anderen Handy die App installieren, die ganze Nachricht kopieren und die App öffnen: ' +
+        'Sie trägt das Thema selbst ein, dort nur noch auf „Verbinden“ tippen.' }),
       el('div', { class: 'stack' },
         el('button', { class: 'btn', onclick: () => N.share() }, icon('share'), 'App und Thema weitergeben')),
       el('p', { class: 'small muted', text: 'Nur an Leute, denen du vertraust: Wer das Thema kennt, kann mitlesen und selbst Meldungen schicken.' })));
@@ -698,6 +735,13 @@
         el('button', { class: 'btn danger', onclick: askReset }, 'Thema ändern'))));
 
     v.append(el('div', { class: 'foot', text: 'ntfy.sh hebt Meldungen 12 Stunden auf. War das Handy länger ohne Netz, fehlen ältere Meldungen hier. Der Lagebericht zeigt trotzdem den aktuellen Stand.' }));
+  }
+
+  /** Stand des Notwegs in wenigen Worten, für die Karte der Verbindung. */
+  function fallbackState(f, now) {
+    if (!f || !f.checkedAt) return 'noch kein Abgleich';
+    if (!f.ready) return 'wartet auf den Radar';
+    return 'bereit · Abgleich ' + when(f.checkedAt, now);
   }
 
   function testAlarm() {
@@ -746,7 +790,7 @@
         id: 'topic', class: 'topic', type: 'text', autocomplete: 'off', autocapitalize: 'none',
         autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'go', placeholder: 'z. B. blackout-radar-…',
         'aria-label': 'Thema', onkeydown: e => { if (e.key === 'Enter') connect(); },
-        oninput: () => { S.setup.error = ''; S.setup.value = input.value; updateSetup(); },
+        oninput: () => { S.setup.error = ''; S.setup.fromCopy = false; S.setup.value = input.value; updateSetup(); },
       });
       input.value = S.setup.value;
       root.append(
@@ -764,10 +808,13 @@
           'Die App speichert es nur auf diesem Handy und schickt es nur an ntfy.sh.'),
         more('wo', 'Wo finde ich das Thema?',
           el('ul', null,
-            el('li', { text: 'Hat dir jemand die App weitergegeben? Dann die ganze Nachricht kopieren und hier auf „Einfügen“ tippen.' }),
+            el('li', { text: 'Hat dir jemand die App weitergegeben? Dann die ganze Nachricht kopieren und wieder hierher wechseln: ' +
+              'Die App erkennt sie und trägt das Thema selbst ein. Klappt das nicht, tippe auf „Einfügen“.' }),
             el('li', { text: 'Am PC auf ntfy.sh/app steht es links in der Liste der abonnierten Themen.' }),
             el('li', { text: 'Am einfachsten schickst du es dir selbst per E-Mail oder Messenger, kopierst es hier am Handy und tippst auf „Einfügen“.' }),
-            el('li', { text: 'Es genügt der Name. Eine ganze Adresse wie https://ntfy.sh/… geht auch.' }))));
+            el('li', { text: 'Es genügt der Name. Eine ganze Adresse wie https://ntfy.sh/… geht auch.' }),
+            el('li', { text: 'Solange diese Seite offen ist, sieht die App in die Zwischenablage. Sie übernimmt daraus nur ' +
+              'eine weitergegebene Nachricht des Blackout-Radars, alles andere lässt sie liegen.' }))));
     }
     updateSetup();
   }
@@ -785,7 +832,8 @@
     msg.className = 'msg-line ' + (S.setup.error ? 'error' : 'info');
     msg.textContent = S.setup.error ||
       (busy ? 'Frage bei ntfy.sh nach, was auf diesem Thema zuletzt kam …' :
-        S.setup.fromLink ? 'Aus dem Link übernommen. Tippe auf „Verbinden“.' : '');
+        S.setup.fromLink ? 'Aus dem Link übernommen. Tippe auf „Verbinden“.' :
+          S.setup.fromCopy ? 'Aus der kopierten Nachricht übernommen. Tippe auf „Verbinden“.' : '');
   }
 
   function connect() {
@@ -897,6 +945,21 @@
       S.setup.value = value;
       S.setup.error = '';
       S.setup.fromLink = false;
+      S.setup.fromCopy = false;
+      updateSetup();
+    },
+    /**
+     * Auf der Einrichtungsseite lag die weitergegebene Nachricht eines anderen Handys in der Zwischenablage.
+     * Die App trägt das Thema ein. Verbinden tippt der Mensch selbst, und was er schon eingetragen hat, bleibt.
+     */
+    onCopied(topic) {
+      const input = document.getElementById('topic');
+      if (!input || S.setup.busy || S.setup.result || input.value.trim()) return;
+      input.value = topic;
+      S.setup.value = topic;
+      S.setup.error = '';
+      S.setup.fromLink = false;
+      S.setup.fromCopy = true;
       updateSetup();
     },
     onSetup(result) {

@@ -40,6 +40,12 @@ import javax.imageio.stream.MemoryCacheImageOutputStream;
  * Verglichen wird der Streifen zwischen den Höhen "von" und "bis" (Prozent von oben, sonst das ganze
  * Bild). Ende mit 0, wenn sich das Bild dort geändert hat, mit 1, wenn es gleich geblieben ist.
  *
+ * Und ein Ausschnitt, damit Kleines wie das App-Symbol auch verkleinert im Protokoll erkennbar bleibt:
+ *
+ *   java android/test/Vorschau.java ausschnitt <bild> <ziel> <links> <oben> <breite> <höhe>
+ *
+ * Alle vier Angaben in Prozent von Breite und Höhe des Bildes.
+ *
  * Braucht nur Java ab Version 11, keine Bibliotheken.
  */
 public class Vorschau {
@@ -55,11 +61,25 @@ public class Vorschau {
         } else if (args.length >= 3 && args[0].equals("vergleichen")) {
             System.exit(compare(Path.of(args[1]), Path.of(args[2]),
                     args.length > 3 ? Integer.parseInt(args[3]) : 0, args.length > 4 ? Integer.parseInt(args[4]) : 100));
+        } else if (args.length == 7 && args[0].equals("ausschnitt")) {
+            crop(Path.of(args[1]), Path.of(args[2]), Integer.parseInt(args[3]), Integer.parseInt(args[4]),
+                    Integer.parseInt(args[5]), Integer.parseInt(args[6]));
         } else {
             System.err.println("Aufruf: Vorschau.java schreiben <ordner> [breite] | lesen <protokoll> <zielordner>"
-                    + " | vergleichen <bild1> <bild2> [von] [bis]");
+                    + " | vergleichen <bild1> <bild2> [von] [bis] | ausschnitt <bild> <ziel> <links> <oben> <breite> <hoehe>");
             System.exit(2);
         }
+    }
+
+    /** Schneidet ein Rechteck aus dem Bild. Die Angaben sind Prozent von Breite und Höhe, was übersteht, fällt weg. */
+    private static void crop(Path source, Path target, int left, int top, int width, int height) throws IOException {
+        BufferedImage image = ImageIO.read(source.toFile());
+        if (image == null) throw new IOException("Kein Bild: " + source);
+        int x = Math.max(0, Math.min(99, left)) * image.getWidth() / 100;
+        int y = Math.max(0, Math.min(99, top)) * image.getHeight() / 100;
+        int w = Math.max(1, Math.min(image.getWidth() - x, width * image.getWidth() / 100));
+        int h = Math.max(1, Math.min(image.getHeight() - y, height * image.getHeight() / 100));
+        ImageIO.write(image.getSubimage(x, y, w, h), "png", target.toFile());
     }
 
     private static void write(Path folder, int width) throws IOException {

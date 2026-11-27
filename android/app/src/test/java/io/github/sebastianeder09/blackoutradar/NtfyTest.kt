@@ -102,6 +102,27 @@ class NtfyTest {
     }
 
     @Test
+    fun ausDerZwischenablageZaehltNurDieWeitergegebeneNachricht() {
+        val url = "https://github.com/sebastianeder09/blackout-radar/releases/latest/download/blackout-radar.apk"
+        val target = Target("https://ntfy.sh", topic)
+        // Die kopierte Nachricht, auch mit dem, was ein Messenger davor und danach setzt, und der Link allein.
+        assertEquals(target, Ntfy.sharedTarget(Ntfy.shareText(target, url)))
+        assertEquals(target, Ntfy.sharedTarget("[27.11., 19:02] Anna: " + Ntfy.shareText(target, url) + "\n[27.11., 19:03] ok"))
+        assertEquals(target, Ntfy.sharedTarget(Ntfy.link(target)))
+        // Was der Mensch sonst gerade kopiert hat, trägt die App nicht von selbst ein, auch wenn es ein Thema sein könnte.
+        for (other in listOf("", topic, "https://ntfy.sh/$topic", "ntfy://ntfy.sh/$topic", "MeinPasswort123", "0123 456789",
+            "Einkaufsliste:\nMilch\nBrot", "https://example.org/blackoutradar://")) {
+            assertNull(other, Ntfy.sharedTarget(other))
+        }
+        // Ein kaputter Link der App ergibt nichts, statt als etwas anderes gelesen zu werden.
+        assertNull(Ntfy.sharedTarget("blackoutradar://abo/zwei/teile"))
+        // Der nachgestellte Server des Emulator-Tests gilt nur im Testbau.
+        val test = Target("http://10.0.2.2:8765", "testthema")
+        assertNull(Ntfy.sharedTarget(Ntfy.shareText(test, url)))
+        assertEquals(test, Ntfy.sharedTarget(Ntfy.shareText(test, url), allowHttp = true))
+    }
+
+    @Test
     fun adressenFuerDenServer() {
         val target = Target("https://ntfy.sh", "t1")
         assertEquals("https://ntfy.sh/t1/json?since=abc", Ntfy.streamUrl(target, "abc"))
@@ -130,6 +151,22 @@ class NtfyTest {
         assertEquals(listOf("rotating_light"), notice.tags)
         assertEquals("https://example.org/status.md", notice.click)
         assertEquals("alarm", notice.level)
+    }
+
+    @Test
+    fun wasUeberNtfyKommtKamNieUeberDenNotweg() {
+        // Auch wenn jemand das Feld in eine Meldung schreibt: Über ntfy angekommen heißt über ntfy angekommen.
+        val notice = (Ntfy.parseLine("""{"id":"n1","time":7,"event":"message","topic":"t","title":"T","message":"M","via":"radar"}""")
+            as StreamEvent.Message).notice
+        assertEquals("", notice.via)
+        assertTrue(!notice.fallback)
+
+        // In der eigenen Liste bleibt der Weg erhalten.
+        val kept = Notice.fromJson(notice.copy(id = "notweg:7:k", via = "netz").toJson())!!
+        assertEquals("netz", kept.via)
+        assertTrue(kept.fallback)
+        // Listen aus älteren Fassungen der App kennen das Feld noch nicht.
+        assertEquals("", Notice.fromJson(org.json.JSONObject("""{"id":"alt","time":1,"title":"T","message":"M"}"""))!!.via)
     }
 
     @Test

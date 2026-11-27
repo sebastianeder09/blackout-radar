@@ -4,7 +4,9 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ClipDescription
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -42,6 +44,7 @@ class MainActivity : Activity() {
     private var pageReady = false
     private var pendingTab: String? = null
     private var pendingOffer: Target? = null
+    private var clipSeenAt = 0L
     private var notifyQueued = false
 
     private val stateListener: () -> Unit = {
@@ -98,6 +101,7 @@ class MainActivity : Activity() {
                 pendingTab = null
                 pendingOffer?.let { offerTopic(it) }
                 pendingOffer = null
+                offerCopied()
             }
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
@@ -146,6 +150,55 @@ class MainActivity : Activity() {
         js("window.BR&&BR.offerTopic(${quote(target.topic)},${quote(Ntfy.mask(target.topic))},${current == target},false)")
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) offerCopied()
+    }
+
+    /**
+     * Noch kein Thema eingerichtet: Hat der Mensch die weitergegebene Nachricht eines anderen Handys kopiert,
+     * trägt die App das Thema daraus selbst ins Feld ein. Verbinden tippt er selbst. Aus der Zwischenablage
+     * zählt nur der Link der App. Alles andere darin bleibt unberührt und verlässt diese Funktion nicht.
+     *
+     * Android lässt eine App nur in die Zwischenablage sehen, solange ihr Fenster vorn ist, und zeigt ab
+     * Android 12 kurz an, dass sie es getan hat. Deshalb sieht die App jeden Inhalt nur einmal an, und nur
+     * solange die Einrichtungsseite offen ist.
+     */
+    private fun offerCopied(again: Boolean = true) {
+        if (!pageReady || !hasWindowFocus() || store.target != null) return
+        val text = try {
+            val clipboard = getSystemService(ClipboardManager::class.java) ?: return
+            val about = clipboard.primaryClipDescription
+            if (about == null) {
+                // Leer, oder Android zählt das Fenster noch nicht als vorn: gleich noch ein Mal nachsehen.
+                if (again) handler.postDelayed({ offerCopied(again = false) }, 500L)
+                return
+            }
+            if (!about.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) && !about.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML)) return
+            // Ohne Zeitangabe (0) lässt sich nicht sagen, ob es noch derselbe Inhalt ist: dann lieber noch einmal ansehen.
+            if (about.timestamp != 0L && about.timestamp == clipSeenAt) return
+            val clip = clipboard.primaryClip ?: return
+            clipSeenAt = about.timestamp
+            if (clip.itemCount > 0) clip.getItemAt(0).text?.toString() else null
+        } catch (e: RuntimeException) {
+            null  // Android gibt die Zwischenablage gerade nicht her
+        } ?: return
+        val target = Ntfy.sharedTarget(text, BuildConfig.DEBUG) ?: return
+        js("window.BR&&BR.onCopied(${quote(Ntfy.plain(target))})")
+    }
+
+    /**
+     * Lädt den Lagebericht für die Anzeige und gleicht ihn dabei mit den angekommenen Meldungen ab (Notweg).
+     * Ein unerwarteter Fehler darin darf die App nicht beenden: Die Verbindung zu ntfy läuft im selben Prozess.
+     */
+    private fun loadStatus(app: Context) {
+        try {
+            Fallback.sync(app)
+        } catch (e: RuntimeException) {
+            // Die Anzeige bleibt beim letzten Stand. Der Wächter gleicht in ein paar Minuten wieder ab.
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         webView?.onResume()
@@ -154,7 +207,7 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis()
         val app = applicationContext
         if (now - store.statusFetchedAt > 2 * 60_000L && !AppState.statusLoading) {
-            Thread({ StatusRepo.refresh(app) }, "lagebericht").start()
+            Thread({ loadStatus(app) }, "lagebericht").start()
         }
         if (now - store.updateCheckedAt > Updates.CHECK_EVERY_MS) {
             Thread({ Updates.check(app) }, "update").start()
@@ -349,7 +402,8 @@ class MainActivity : Activity() {
         fun messages(): String {
             val array = org.json.JSONArray()
             for (notice in store.log.all()) {
-                array.put(notice.toJson().put("level", notice.level).put("symbols", Ntfy.emoji(notice.tags)))
+                array.put(notice.toJson().put("level", notice.level).put("symbols", Ntfy.emoji(notice.tags))
+                    .put("viaText", Fallback.reason(notice.via)))
             }
             return array.toString()
         }
@@ -370,7 +424,7 @@ class MainActivity : Activity() {
                 }
                 val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).coerceToText(this@MainActivity).toString() else ""
                 // Aus einer weitergegebenen Nachricht zählt nur der Link der App, der Rest ist Anleitung.
-                val shared = Ntfy.findLink(text)?.let { Ntfy.parseLink(it, BuildConfig.DEBUG) }
+                val shared = Ntfy.sharedTarget(text, BuildConfig.DEBUG)
                 js("window.BR&&BR.onPaste(${quote(shared?.let { Ntfy.plain(it) } ?: text.take(500))})")
             }
         }
@@ -386,7 +440,7 @@ class MainActivity : Activity() {
                     js("window.BR&&BR.onSetup($json)")
                     if (result.ok) askPermissionsOnce()
                 }
-                if (result.ok) StatusRepo.refresh(app)
+                if (result.ok) loadStatus(app)
             }, "einrichten").start()
         }
 
@@ -414,7 +468,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun refreshStatus() {
             val app = applicationContext
-            Thread({ StatusRepo.refresh(app) }, "lagebericht").start()
+            Thread({ loadStatus(app) }, "lagebericht").start()
         }
 
         @JavascriptInterface

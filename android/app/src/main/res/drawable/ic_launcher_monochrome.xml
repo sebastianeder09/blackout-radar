@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Einfarbige Fassung für das "thematische Symbol" ab Android 13. -->
+<!-- Einfarbige Fassung für das "thematische Symbol" ab Android 13: Ring und Blitz, Android färbt sie selbst ein. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -8,9 +8,12 @@
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="2.5"
-        android:pathData="M54,54 m-29,0 a29,29 0 1,0 58,0 a29,29 0 1,0 -58,0" />
+        android:strokeWidth="2.4"
+        android:pathData="M24,54 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0" />
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M58,30 L41,57 h11 L48,78 l19,-27 h-11.5 z" />
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.6"
+        android:strokeLineJoin="round"
+        android:pathData="M57.28,34.32 L43.34,56.46 L52.36,56.46 L49.08,73.68 L64.66,51.54 L55.23,51.54 Z" />
 </vector>

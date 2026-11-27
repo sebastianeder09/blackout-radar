@@ -1,21 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- App-Symbol: Radarkreise mit Blitz. Das Motiv liegt in der sicheren Mitte (66 von 108). -->
+<!-- App-Symbol: ein Ring wie beim Radar, darin eine helle Scheibe mit Blitz. Das Motiv liegt in der sicheren Mitte (66 von 108). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#00000000"
-        android:strokeColor="#3D6B8E"
-        android:strokeWidth="2.5"
-        android:pathData="M54,54 m-29,0 a29,29 0 1,0 58,0 a29,29 0 1,0 -58,0" />
+        android:strokeColor="#008FFF"
+        android:strokeAlpha="0.22"
+        android:strokeWidth="2.4"
+        android:pathData="M24,54 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0" />
     <path
-        android:fillColor="#00000000"
-        android:strokeColor="#2B4D68"
-        android:strokeWidth="2.5"
-        android:pathData="M54,54 m-18,0 a18,18 0 1,0 36,0 a18,18 0 1,0 -36,0" />
+        android:fillColor="#D4EAFF"
+        android:pathData="M31.5,54 a22.5,22.5 0 1,0 45,0 a22.5,22.5 0 1,0 -45,0" />
     <path
-        android:fillColor="#FFC83D"
-        android:pathData="M58,30 L41,57 h11 L48,78 l19,-27 h-11.5 z" />
+        android:fillColor="#008FFF"
+        android:strokeColor="#008FFF"
+        android:strokeWidth="2.6"
+        android:strokeLineJoin="round"
+        android:pathData="M57.28,34.32 L43.34,56.46 L52.36,56.46 L49.08,73.68 L64.66,51.54 L55.23,51.54 Z" />
 </vector>

@@ -20,6 +20,9 @@ object StatusRepo {
         return (override ?: "https://raw.githubusercontent.com/${BuildConfig.REPO}/state").trimEnd('/')
     }
 
+    /** Die Seite, auf der der Lagebericht für Menschen lesbar steht. Dorthin führen auch die Meldungen des Radars. */
+    fun pageUrl(): String = "https://github.com/${BuildConfig.REPO}/blob/state/status.md"
+
     fun cachedJson(store: Store): String? = read(store.statusJsonFile)
 
     fun cachedMarkdown(store: Store): String? = read(store.statusMdFile)
@@ -90,7 +93,13 @@ object StatusRepo {
 object MonitorWatch {
     const val STALE_AFTER_MS = 3 * 60 * 60_000L
     const val REPEAT_AFTER_MS = 12 * 60 * 60_000L
-    const val CHECK_EVERY_MS = 25 * 60_000L
+
+    /**
+     * Mindestabstand zwischen zwei Abfragen des Lageberichts im Hintergrund. Der Radar schreibt ihn alle
+     * 5 Minuten neu, öfter nachzusehen bringt nichts. Der Wächter kommt etwa alle 15 Minuten, der Dienst
+     * fragt in diesem Abstand, solange er ntfy nicht erreicht.
+     */
+    const val CHECK_EVERY_MS = 5 * 60_000L
 
     fun isStale(nowMs: Long, generatedAtMs: Long): Boolean =
         generatedAtMs > 0 && nowMs - generatedAtMs >= STALE_AFTER_MS

@@ -44,6 +44,7 @@ class Delivery(unittest.TestCase):
         self.assertEqual([call[0] for call in self.calls], ["ntfy", "email"])
         self.assertEqual(self.state["outbox"], [])
         self.assertEqual(self.state["sent"][0]["channels"], ["ntfy", "email"])
+        self.assertEqual(self.state["sent"][0]["body"], "Text")  # für die Liste der letzten Meldungen im Lagebericht
 
     def test_daily_summary_is_not_mailed(self):
         notifier = self.notifier()

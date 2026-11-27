@@ -119,9 +119,16 @@ REGIONS: dict[str, tuple[str, str, float]] = {
 }
 
 # Sondergebiete
+EUROPE_WIDE = "EU"  # Schlagzeilen, die nur "Europa" nennen ("Massive blackout hits Europe")
 SPECIAL: dict[str, tuple[str, str, float]] = {
     "EU-CE": ("Verbundnetz Kontinentaleuropa", "Continental Europe grid", 450.0),
+    EUROPE_WIDE: ("Europa", "Europe", 450.0),
 }
+# Staaten, die mit "Europa" gemeint sind. Ohne Russland, Belarus und die Türkei (eigene Netze) und ohne die
+# Ukraine und Moldau: Die Ausfälle dort haben mit dem Krieg eine eigene Ursache und bleiben ein eigenes Ereignis.
+EUROPE = frozenset(
+    "AT DE CH IT FR ES PT NL BE LU DK SE NO FI IS IE GB PL CZ SK HU SI HR BA RS ME MK AL XK GR BG RO LT LV EE "
+    "CY MT LI AD MC SM".split())
 
 _PAIRS = [
     ("AT", "DE"), ("AT", "CZ"), ("AT", "SK"), ("AT", "HU"), ("AT", "SI"), ("AT", "IT"), ("AT", "CH"), ("AT", "LI"),
@@ -171,9 +178,19 @@ def population(area: str) -> int:
 
 
 def related(a: str, b: str) -> bool:
-    """Wahr, wenn zwei Gebiete im selben Staat liegen oder die Staaten benachbart sind."""
+    """Wahr, wenn zwei Gebiete im selben Staat liegen oder die Staaten benachbart sind.
+
+    "Europa" gehört zu jedem europäischen Staat.
+    """
     pa, pb = parent(a), parent(b)
+    if EUROPE_WIDE in (pa, pb):
+        return pa == pb or pa in EUROPE or pb in EUROPE
     return pa == pb or pb in NEIGHBOURS.get(pa, ())
+
+
+def in_europe(area: str) -> bool:
+    """Wahr für "Europa" selbst und für jedes Gebiet in einem europäischen Staat."""
+    return area == EUROPE_WIDE or parent(area) in EUROPE
 
 
 def search_names(area: str) -> list[str]:

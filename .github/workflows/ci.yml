@@ -50,4 +50,6 @@ jobs:
           echo "----- Lagebericht -----"
           cat "$RUNNER_TEMP/radar/status.md"
           echo "----- Zustand -----"
-          python3 -c "import json, sys; s = json.load(open(sys.argv[1])); print(json.dumps({k: s[k] for k in ('sources', 'outbox', 'sent', 'daily') if k in s}, ensure_ascii=False, indent=1)); print('Ereignisse:', len(s.get('events', {})), 'Verlauf:', len(s.get('history', [])))" "$RUNNER_TEMP/radar/state.json"
+          python3 -c "import json, sys; s = json.load(open(sys.argv[1])); print(json.dumps({k: s[k] for k in ('sources', 'reach', 'outbox', 'sent', 'daily') if k in s}, ensure_ascii=False, indent=1)); print('Ereignisse:', len(s.get('events', {})), 'Verlauf:', len(s.get('history', [])))" "$RUNNER_TEMP/radar/state.json"
+          echo "----- Lagebericht für Programme (Auszug) -----"
+          python3 -c "import json, sys; s = json.load(open(sys.argv[1])); print(json.dumps({'europe': s['europe'], 'notices': s['notices'][:3]}, ensure_ascii=False, indent=1))" "$RUNNER_TEMP/radar/status.json"

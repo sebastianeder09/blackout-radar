@@ -2,7 +2,7 @@
 
 Überwacht größere Stromausfälle weltweit und meldet sie per Push aufs Handy oder den PC (ntfy) und per E-Mail. Dazu gibt es einen Lagebericht mit Verlauf und Statistik, der immer aktuell im Netz steht.
 
-Das Programm läuft kostenlos alle 5 Minuten bei GitHub. Es braucht keinen eigenen Server und läuft deshalb auch weiter, wenn in Österreich der Strom weg ist.
+Das Programm läuft kostenlos alle 5 Minuten bei GitHub. Es braucht keinen eigenen Server und läuft deshalb auch weiter, wenn in Österreich der Strom weg ist. Radar, Push-Dienst und Lagebericht stehen in den USA, siehe [Stromausfall in ganz Europa](#stromausfall-in-ganz-europa).
 
 ## Was gemeldet wird
 
@@ -11,8 +11,10 @@ Das Programm läuft kostenlos alle 5 Minuten bei GitHub. Es braucht keinen eigen
 | **Oberösterreich** | sofort bei jedem Hinweis, auch bei kleinen und kurzen Ausfällen | Warnung, ab 15 % Betroffenen Alarm |
 | **Österreich** | sofort, sobald rund 15 % des Landes betroffen sind | Alarm |
 | **Nachbarländer** | wie Rest der Welt | Warnung |
+| **Europa** (Schlagzeilen nennen nur den Kontinent) | sofort, wenn die Schlagzeilen den Ausfall europaweit nennen ("Ganz Europa ohne Strom"), sonst wie Rest der Welt | Alarm, sonst Warnung |
 | **Rest der Welt** | ab 30 Minuten Dauer und rund 500.000 Betroffenen, wenn Strom als Ursache belegt ist | Info |
 | **Netzfrequenz Europa** | sofort bei mehr als 200 mHz Abweichung von 50 Hz | Warnung, ab 500 mHz Alarm |
+| **Messquellen in Europa** | wenn 10 Minuten lang keine von ihnen antwortet, Quellen außerhalb Europas aber schon | Warnung |
 
 Kleine und kurze Ausfälle außerhalb Oberösterreichs werden nicht gemeldet. Sie stehen im Lagebericht unter "Unter Beobachtung", mit dem Grund, warum keine Meldung kam.
 
@@ -100,9 +102,33 @@ Unter *Actions → Blackout-Radar → Run workflow* gibt es fünf Aktionen:
 
 **Lagebericht:** <https://github.com/sebastianeder09/blackout-radar/blob/state/status.md>
 
-Jede Meldung führt per Antippen dorthin. Der Bericht zeigt laufende und beendete Ereignisse mit Zeitleiste, Störungen unter Beobachtung, Kennzahlen (Netzfrequenz, Stromlast), Statistik über 24 Stunden bis 90 Tage und den Zustand der Datenquellen. Dieselben Daten liegen maschinenlesbar in `status.json` daneben.
+Jede Meldung führt per Antippen dorthin. Der Bericht zeigt laufende und beendete Ereignisse mit Zeitleiste, Störungen unter Beobachtung, Kennzahlen (Netzfrequenz, Stromlast), Statistik über 24 Stunden bis 90 Tage und den Zustand der Datenquellen. Dieselben Daten liegen maschinenlesbar in `status.json` daneben. Dort stehen auch die letzten 20 Meldungen mit Text und Dringlichkeit (`notices`, neueste zuerst), damit eine App nachholen kann, was als Push nicht ankam, und die Erreichbarkeit der Messquellen in Europa (`europe`).
 
 Täglich um 07:00 Uhr kommt eine leise Übersicht. Sie ist zugleich das Lebenszeichen: Bleibt sie aus, läuft die Überwachung nicht mehr.
+
+## Stromausfall in ganz Europa
+
+Radar, Push-Dienst und Lagebericht hängen nicht am europäischen Stromnetz. Gemessen am 27.11.2026 aus einem Lauf des Radars:
+
+| Baustein | Standort | Bei einem Stromausfall in ganz Europa |
+|---|---|---|
+| Radar (GitHub Actions) | USA. Alle rund 50 Läufe des Tages liefen dort, GitHub sagt aber keine Region zu | läuft weiter |
+| Push-Dienst ntfy.sh | USA (New Jersey) | läuft weiter. Der Betreiber sagt keine Verfügbarkeit zu ([FAQ](https://docs.ntfy.sh/faq/)) |
+| Lagebericht und Zustand (GitHub) | USA | bleiben abrufbar |
+| Medien: Google News und 20 Nachrichten-Feeds | USA, Kanada, Australien, Asien, Südamerika | laufen weiter und sind dann die Hauptquelle |
+| Netzfrequenz und Stromlast (Energy-Charts, netzfrequenzmessung.de) | Deutschland (Freiburg, Nürnberg) | fallen voraussichtlich aus |
+| Störmeldungen LINZ NETZ | Linz | fallen voraussichtlich aus |
+
+Darauf ist der Radar eingerichtet:
+
+- **"Europa" ist ein eigenes Gebiet.** Medien in Übersee nennen bei einem großen Ausfall oft nur den Kontinent ("Massive blackout hits Europe"). Solche Schlagzeilen zählen für "Europa", wenn mindestens 3 Medien so berichten und die Schlagzeile kein Land nennt. Nennen sie den Ausfall europaweit ("Europe-wide blackout", "Ganz Europa ohne Strom"), kommt sofort ein Alarm. Sonst gilt die Regel für den Rest der Welt, mit Warnung statt Info. Kommen danach Berichte aus einzelnen Ländern Europas dazu, laufen sie im selben Ereignis zusammen, so bleibt der Verlauf lesbar.
+- **Nachrichten-Feeds aus Übersee** sind der zweite Weg neben Google News: 20 Feeds großer Medien in den USA, Kanada, Australien, Asien und Südamerika. Je Lauf werden 4 abgefragt, jeder Feed kommt also etwa alle 25 Minuten an die Reihe.
+- **Warnung "Messquellen in Europa nicht erreichbar":** Antworten Netzfrequenz, Stromlast und Störmeldungen 10 Minuten lang alle nicht, während Quellen außerhalb Europas antworten, kommt eine Warnung. Sie belegt keinen Stromausfall: Dieselbe Lage entsteht, wenn die Verbindung zwischen den USA und Europa gestört ist. Der Lagebericht zeigt den Hinweis ganz oben. Antwortet eine der Quellen wieder, kommt eine Meldung dazu. Sie ist keine Entwarnung für einen Stromausfall.
+
+Was der Radar nicht absichern kann, ist der eigene Empfang:
+
+- **Starlink mit eigenem Strom:** Beim Ausfall in Spanien und Portugal am 28.04.2025 blieben Nutzer mit eigener Stromversorgung online, Starlink leitete den Verkehr über London und Mailand um ([Kentik](https://kentik.com/blog/lunes-sin-luz-spain-and-portugals-historic-outage)). Für einen Ausfall in ganz Europa gibt es keinen Erfahrungswert. Dann kommt es auf den Notstrom der Bodenstationen an.
+- **Handy:** Es braucht das eigene WLAN. Der Internetverkehr fiel damals binnen fünf Stunden um rund 80 % (Spanien) und 90 % (Portugal) ([Cloudflare](https://blog.cloudflare.com/how-power-outage-in-portugal-spain-impacted-internet)), auf den Mobilfunk ist also kein Verlass.
 
 ## Einstellungen
 
@@ -114,6 +140,8 @@ Alle Schwellen stehen in [`config.toml`](config.toml), jeweils mit Erklärung. O
 | Tägliche Übersicht abschalten | `[daily_summary] enabled = false` |
 | Weltweit erst ab 1 Million Betroffenen melden | `[filter] min_affected_people = 1000000` |
 | Ganz Österreich so behandeln wie Oberösterreich | `[priority] always_areas = ["AT-4", "AT"]` |
+| Nachrichten-Feeds aus Übersee abschalten | `[sources.news] feeds_per_run = 0` |
+| Keine Warnung, wenn die Messquellen in Europa verstummen | `[health] europe_hosts = []` |
 
 ## Datenquellen
 
@@ -122,8 +150,10 @@ Alle Schwellen stehen in [`config.toml`](config.toml), jeweils mit Erklärung. O
 | Netzfrequenz (Energy-Charts, Ersatz: netzfrequenzmessung.de, laut Anbieter nur für privaten Gebrauch) | Frequenz im Verbundnetz Kontinentaleuropa, sekundengenau | 1 bis 2 Minuten | live geprüft |
 | Stromlast (Energy-Charts, Daten von ENTSO-E) | Verbrauch je Land für Österreich und 9 weitere Länder (DE, CZ, SK, HU, CH, FR, ES, PT, PL) | 2 bis 5 Stunden | live geprüft, Auswertung an 3 echten Großausfällen nachgespielt |
 | Medien (Google News) | Schlagzeilen in 6 Sprachen, gezielte Suchen für Oberösterreich und Österreich | je nach Berichterstattung, geschätzt 15 bis 90 Minuten | live geprüft |
+| Medien (20 Nachrichten-Feeds aus Übersee) | Schlagzeilen großer Medien in den USA, Kanada, Australien, Asien und Südamerika, auf Englisch, Spanisch und Portugiesisch | wie oben, dazu bis zu 25 Minuten, bis ein Feed wieder an der Reihe ist | live geprüft |
+| Gemeindeverzeichnis (Statistik Austria) | Bundesland zu jedem Ort in Österreich: 2.092 Gemeinden, die politischen Bezirke und die Wiener Gemeindebezirke | fest im Programm, Gebietsstand 2026 | an echten Schlagzeilen geprüft |
 | Störmeldungen LINZ NETZ | öffentliche Störungsseite, zählt für Oberösterreich | wenige Minuten | Seite wird gelesen, eine echte Störung war beim Einrichten nicht aktiv |
-| IODA (Georgia Tech) | Internet-Ausfälle weltweit | | abgeschaltet, der Dienst war beim Einrichten nicht erreichbar |
+| IODA (Georgia Tech) | Internet-Ausfälle weltweit | | abgeschaltet: Der Dienst nimmt die Verbindung an, antwortet automatischen Abfragen aber nicht (zweimal gemessen, zuletzt am 27.11.2026) |
 | Cloudflare Radar | Internet-Ausfälle mit Ursache | | abgeschaltet, braucht ein eigenes Token, ungeprüft |
 
 ### Gegenprobe mit echten Stromausfällen
@@ -156,6 +186,8 @@ Italien und Slowenien werden nicht überwacht: Ihre Lastwerte waren bei der Prü
 - **Kein Messnetz für Stromausfälle.** Es gibt weltweit keine offene Echtzeit-Quelle für Stromausfälle. Das Programm kombiniert Indizien. Betroffenenzahlen sind grobe Schätzungen.
 - **Medienberichte** belegen, dass etwas passiert ist, aber weder Dauer noch Ende. Ein Ausfall, der nur aus Medien bekannt ist, bekommt deshalb eine Meldung "(laut Medien)" und keine Entwarnung.
 - **Schlagzeilen** entscheiden, ob ein Bericht zählt. Vorsorge, Übungen, Warnungen und Aufarbeitung werden aussortiert, im Deutschen zählt das Wort "Blackout" allein nicht. Für Oberösterreich genügt ein Bericht, dessen Schlagzeile einen Ort in Oberösterreich nennt. Nennt sie keinen Ort, braucht es ein zweites Medium. Für Österreich zählen nur Schlagzeilen, die Österreich oder einen Ort dort nennen, denn österreichische Medien berichten auch über Ausfälle im Ausland. Berichte über Ursache, Ermittlungen und Folgen ("Staatsschutz ermittelt", "Kritik nach Stromausfall") gelten als Aufarbeitung, wenn es im Gebiet in den Tagen davor schon Berichte über einen Stromausfall gab. Dafür schaut das Programm beim ersten Lauf eine Woche zurück. "Alles ohne Strom" heißt in großen Staaten nur dann landesweit, wenn die Schlagzeile den Staat nennt (ein Ausfall auf ganz Oahu ist keiner der ganzen USA). Ganz ausschließen lassen sich Fehlalarme und übersehene Berichte damit nicht.
+- **Orte in Österreich** ordnet das Programm über das amtliche Gemeindeverzeichnis dem Bundesland zu. Ein Bericht aus Lieboch zählt damit für die Steiermark und nicht für Oberösterreich. Das Verzeichnis kennt Gemeinden, Bezirke und die Wiener Gemeindebezirke, aber keine Ortsteile. Namen, die es in mehreren Bundesländern gibt ("Neumarkt", "Kirchberg"), entscheiden nichts. Heißt ein Ortsteil anderswo oder ein Ort in Bayern so wie eine Gemeinde in Oberösterreich, kann ein Bericht weiterhin falsch zugeordnet werden. Die bekannten Fälle sind ausgenommen (Wartberg, Pichl, Rosenau, Pfarrkirchen und weitere). Das Verzeichnis ändert sich mit Gemeindezusammenlegungen: einmal im Jahr mit `python3 tools/orte_at.py` neu erzeugen.
+- **"Europa" in Schlagzeilen** zählt nur als Ort des Ausfalls. Als Teil eines Namens oder als Besitzer zählt es nicht ("Europa League", "Europas größtes Atomkraftwerk ohne Strom"), ebenso wenig, wenn nur die Folgen europaweit reichen ("Zugverkehr europaweit gestört"). Ungewöhnliche Formulierungen können trotzdem durchrutschen oder fehlen.
 - **Lastdaten kommen 2 bis 5 Stunden verzögert**, je nach Land. Die Zeiten in den Meldungen stimmen, aber Wiederherstellung und Entwarnung erfährt man entsprechend später. Im Ernstfall sind Radio (ORF) und Behörden schneller.
 - **Lastdaten können bei einem großen Ausfall ganz ausbleiben.** In Spanien meldete der Netzbetreiber am 28.04.2025 ab Beginn des Ausfalls eineinhalb Tage lang keine Werte. Dann gibt es von dieser Quelle weder Bestätigung noch Entwarnung, die Meldungen stützen sich auf Netzfrequenz und Medien. Der Lagebericht zeigt in so einem Fall "keine neuen Werte seit ..." statt eines alten, normal aussehenden Werts. Ausbleibende Werte allein sind kein Beleg für einen Ausfall.
 - **Kleine und kurze Einbrüche** sieht die Stromlast nicht: Ein Befund braucht mindestens 20 % weniger Last als an vergleichbaren Tagen, über mindestens zwei Werte. Als beendet gilt ein Einbruch, wenn die Last wieder bis auf 10 % am üblichen Wert liegt.
@@ -165,7 +197,8 @@ Italien und Slowenien werden nicht überwacht: Ihre Lastwerte waren bei der Prü
 - **GitHub** startet geplante Läufe nur "nach Möglichkeit": oft spät, selten oder in neuen Repositories gar nicht. Deshalb gibt es den Taktgeber (Einrichten, Schritt 4). Auch er hängt an GitHub: Bei einer Störung dort kann die Kette reißen, bis der nächste Lauf sie neu startet. Nach einer Lücke von 90 Minuten kommt eine Meldung.
 - **Zeitplan bei GitHub:** GitHub schaltet Zeitpläne ab, wenn in einem öffentlichen Repository 60 Tage lang nichts geschieht. Der Ablauf wirkt dem selbst entgegen: Einmal pro Woche bestätigt er seinen Zeitplan, und nach 45 Tagen ohne Änderung setzt er einen Vermerk in den Hauptzweig (`.github/zeitplan-aktiv`). Ob das auf Dauer reicht, zeigt erst die Zeit. Bleibt die tägliche Übersicht aus, lässt sich der Ablauf unter *Actions → Blackout-Radar* mit "Enable workflow" wieder einschalten.
 - **ntfy.sh** begrenzt die kostenlose Nutzung je Absender-Adresse, und GitHub-Läufe teilen sich Adressen mit anderen Nutzern. Eine abgewiesene Meldung wird bei den nächsten Läufen erneut versucht, bis zu 12 Stunden lang. E-Mail ist der zweite Weg. Wer das ausschließen will, betreibt einen eigenen ntfy-Server (`NTFY_SERVER`).
-- **Google News** bietet die Suche als RSS für Feed-Leser an, ohne Zusage. Fällt eine Quelle 3 Stunden aus, kommt eine Meldung.
+- **Google News** bietet die Suche als RSS für Feed-Leser an, ohne Zusage. Fällt eine Quelle 3 Stunden aus, kommt eine Meldung. Fällt nur Google News oder nur der Weg über die Feeds aus, läuft der andere weiter, und die Quelle gilt als "eingeschränkt". Die gezielten Suchen für Oberösterreich und Österreich gibt es nur bei Google News. Jede abgewiesene Abfrage steht im Protokoll des Laufs.
+- **Stromausfall in ganz Europa:** Radar, Push-Dienst und Nachrichtenquellen stehen in den USA, zugesagt ist das von keinem der Anbieter. Die Messquellen in Europa fallen dann voraussichtlich aus, und ob Starlink weiterläuft, ist offen. Siehe [Stromausfall in ganz Europa](#stromausfall-in-ganz-europa).
 - **Öffentlich:** Repository, Lagebericht und Protokolle sind für jeden lesbar. Zugangsdaten stehen nur in den GitHub-Secrets und werden aus Fehlertexten entfernt.
 
 ## Eigener Rechner statt GitHub
@@ -180,7 +213,7 @@ set -a; . ./.env; set +a
 python3 -m blackout_radar daemon
 ```
 
-Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anzeigen), `status`, `test-push`, `simulate`, `probe` (Diagnose der Datenquellen), `probe --only replay` (lädt die Lastwerte der echten Ausfälle neu und spielt sie durch). Der Zustand liegt dann unter `data/`. Ein Rechner im eigenen Haus fällt bei einem Stromausfall allerdings mit aus.
+Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anzeigen), `status`, `test-push`, `simulate`, `probe` (Diagnose der Datenquellen, mit `--only feeds` nur die Feeds aus Übersee), `probe --only replay` (lädt die Lastwerte der echten Ausfälle neu und spielt sie durch). Der Zustand liegt dann unter `data/`. Ein Rechner im eigenen Haus fällt bei einem Stromausfall allerdings mit aus.
 
 ## Aufbau
 
@@ -188,15 +221,18 @@ Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anze
 |---|---|
 | `blackout_radar/collectors/` | Datenquellen, jede liefert Signale je Gebiet |
 | `blackout_radar/engine.py` | fasst Signale zu Ereignissen zusammen und entscheidet, was gemeldet wird |
+| `blackout_radar/gazetteer.py`, `gemeindeliste.py` | Ortsnamen in Schlagzeilen: Staaten, große Städte, "Europa", Gemeinden in Österreich |
+| `blackout_radar/reach.py` | Erreichbarkeit der Messquellen in Europa |
 | `blackout_radar/notify.py` | Versand über ntfy und E-Mail mit Wiederholung |
 | `blackout_radar/report.py` | Lagebericht, Statistik, tägliche Übersicht |
 | `blackout_radar/simulate.py` | Planspiel |
 | `blackout_radar/takt.py` | Taktgeber: die Kette von Läufen bei GitHub und ihre Sicherungen |
 | `tests/` | Tests, laufen ohne Netz: `python3 -m unittest discover -s tests -t .` |
+| `tools/orte_at.py` | erzeugt `gemeindeliste.py` aus dem Gemeindeverzeichnis von Statistik Austria |
 | `tests/gegenprobe.py` | Gegenprobe der Lastauswertung mit gedachten Ausfällen in echten Reihen: `python3 -m tests.gegenprobe` |
 | `.github/workflows/monitor.yml` | Lauf alle 5 Minuten, Zustand im Zweig `state` |
 | `.github/workflows/ci.yml` | Tests und Probelauf gegen die echten Datenquellen bei jeder Änderung |
 | `android/` | Android-App: Push über ntfy, Alarmton, Lagebericht, siehe [android/README.md](android/README.md) |
 | `.github/workflows/android.yml` | baut die App, prüft sie im Emulator und veröffentlicht sie unter *Releases* |
 
-Datenquellen: Energy-Charts (Fraunhofer ISE, Daten von ENTSO-E, CC BY 4.0, energy-charts.info), netzfrequenzmessung.de, Google News, Störmeldungen der LINZ NETZ GmbH.
+Datenquellen: Energy-Charts (Fraunhofer ISE, Daten von ENTSO-E, CC BY 4.0, energy-charts.info), netzfrequenzmessung.de, Google News, Nachrichten-Feeds von Medien in Amerika, Asien und Australien, Störmeldungen der LINZ NETZ GmbH. Gemeindeverzeichnis: STATISTIK AUSTRIA.

@@ -19,7 +19,7 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
-from . import collectors, config, probe, report, simulate, takt
+from . import collectors, config, http, probe, reach, report, simulate, takt
 from .engine import Engine
 from .model import Message, fmt_duration, iso, now_utc, parse_ts, zone
 from .notify import Notifier, scrub, secrets
@@ -88,18 +88,26 @@ def upkeep(cfg: dict, state: dict, now, notice: str | None = None) -> list[Messa
     if notice:
         messages.append(Message("Blackout-Radar: Zustand neu begonnen", notice, "info", f"reset:{iso(now)}", url))
 
+    silent = reach.silent_since(state) is not None
     for name, entry in (state.get("sources") or {}).items():
         if not (cfg["sources"].get(name) or {}).get("enabled"):
             continue
         label = report.SOURCE_NAMES.get(name, name)
         failing = parse_ts(entry.get("fail_since"))
         if failing and not entry.get("alerted") and now - failing >= timedelta(hours=health["alert_after_hours"]):
+            if silent and name in reach.EUROPEAN_SOURCES:
+                continue  # steckt schon in der Meldung "Messquellen in Europa nicht erreichbar"
             entry["alerted"] = True
-            messages.append(Message(
-                f"Datenquelle gestört: {label}",
-                f"Seit {clock(failing)} Uhr liefert diese Quelle keine Daten "
-                f"({entry.get('last_error') or 'Fehler unbekannt'}). Die übrigen Quellen laufen weiter.",
-                "info", f"source-down:{name}:{entry['fail_since']}", url))
+            error = entry.get("last_error") or "Fehler unbekannt"
+            if entry.get("partial"):
+                title = f"Datenquelle eingeschränkt: {label}"
+                body = (f"Seit {clock(failing)} Uhr fällt ein Teil dieser Quelle aus ({error}). "
+                        "Der Rest der Quelle und die übrigen Quellen laufen weiter.")
+            else:
+                title = f"Datenquelle gestört: {label}"
+                body = (f"Seit {clock(failing)} Uhr liefert diese Quelle keine Daten ({error}). "
+                        "Die übrigen Quellen laufen weiter.")
+            messages.append(Message(title, body, "info", f"source-down:{name}:{entry['fail_since']}", url))
         elif not failing and entry.get("alerted"):
             entry["alerted"] = False
             messages.append(Message(f"Datenquelle wieder in Ordnung: {label}", "Die Quelle liefert wieder Daten.",
@@ -123,8 +131,10 @@ def tick(cfg: dict, state: dict, now, deliver: bool = True, notice: str | None =
     """Ein vollständiger Lauf auf dem übergebenen Zustand."""
     state.setdefault("created", iso(now))
     engine = Engine(cfg, state)
+    http.drain()  # Anfragen von vor diesem Lauf (Versand) zählen nicht für die Erreichbarkeit
     signals, health = collectors.collect_all(cfg, state, now, {"active_areas": engine.active_areas()})
     messages = engine.tick(signals, now)
+    messages += reach.update(cfg, state, now, http.drain())
     messages += upkeep(cfg, state, now, notice)
     notifier = Notifier(cfg, state)
     notifier.queue(messages, now)
@@ -134,7 +144,8 @@ def tick(cfg: dict, state: dict, now, deliver: bool = True, notice: str | None =
 
 
 def _summary(result: dict) -> str:
-    parts = [f"{name} {'ok' if entry['ok'] else 'FEHLER'}" for name, entry in result["health"].items()]
+    parts = [f"{name} {'ok' if entry['ok'] else 'eingeschränkt' if entry.get('partial') else 'FEHLER'}"
+             for name, entry in result["health"].items()]
     return (f"Lauf fertig: {result['signals']} Signale, {len(result['messages'])} neue Meldungen, "
             f"{result['delivered']} zugestellt. Quellen: {', '.join(parts) or 'keine eingeschaltet'}")
 
@@ -285,8 +296,8 @@ def main(argv: list[str] | None = None) -> int:
     sim.set_defaults(func=cmd_simulate)
 
     diag = sub.add_parser("probe", help="Diagnose: jede Datenquelle einmal roh abfragen")
-    diag.add_argument("--only", help="nur diese Quellen, mit Komma getrennt (load,frequency,news,utility,ioda,ntfy). "
-                                     "replay spielt die Lastauswertung an echten Tagen nach")
+    diag.add_argument("--only", help="nur diese Quellen, mit Komma getrennt (load,frequency,news,feeds,utility,ntfy). "
+                                     "replay spielt die Lastauswertung an echten Tagen nach, ioda fragt IODA ab")
     diag.set_defaults(func=cmd_probe)
 
     clock = sub.add_parser("takt", help="Taktgeber in GitHub Actions: nächstes Glied und einen Lauf anstoßen")

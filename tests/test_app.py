@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from blackout_radar import __main__ as app
-from blackout_radar import collectors, config, notify, report
+from blackout_radar import collectors, config, http, notify, report
 from blackout_radar.engine import Engine
 from blackout_radar.http import HttpError
 from blackout_radar.model import iso
@@ -26,6 +26,9 @@ class Harness(unittest.TestCase):
     def setUp(self):
         self.signals = []      # was die Quelle "news" im nächsten Lauf liefert
         self.broken = False    # True: die Quelle "news" schlägt fehl
+        self.partial = ""      # Text: ein Teil der Quelle "news" fällt aus
+        self.europe_up = True  # False: die Messquellen in Europa antworten nicht
+        self.offline = False   # True: der Push-Dienst nimmt nichts an
         self.pushed = []       # zugestellte Meldungen
         sources = mock.patch.dict(collectors.COLLECTORS, {"news": self.fake_news}, clear=True)
         senders = mock.patch.dict(notify.SENDERS, {"ntfy": self.fake_push})
@@ -39,10 +42,23 @@ class Harness(unittest.TestCase):
     def fake_news(self, cfg, cursor, now, context):
         if self.broken:
             raise HttpError("HTTP 503 von news.google.com")
+        http.JOURNAL.append(("news.google.com", True))
         cursor["data_time"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        cursor["degraded"] = self.partial
         return list(self.signals)
 
+    def european_source(self, *hosts):
+        """Attrappe einer Messquelle in Europa: fragt ihre Hosts ab und scheitert, wenn Europa schweigt."""
+        def collect(cfg, cursor, now, context):
+            http.JOURNAL.extend((host, self.europe_up) for host in hosts)
+            if not self.europe_up:
+                raise HttpError(f"{hosts[0]} nicht erreichbar (timed out)")
+            return []
+        return collect
+
     def fake_push(self, cfg, message):
+        if self.offline:
+            raise notify.DeliveryError("ntfy: ntfy.sh nicht erreichbar (thema)")
         self.pushed.append(message)
 
     def titles(self):
@@ -106,11 +122,92 @@ class Upkeep(Harness):
         self.broken = True
         for minute in range(30, 60 * 8, 30):
             self.tick(minute)
-        self.assertEqual(self.titles()[1:], ["Datenquelle gestört: Medien (Google News)"])
+        self.assertEqual(self.titles()[1:], ["Datenquelle gestört: Medien (Google News, Feeds aus Übersee)"])
         self.assertIn("HTTP 503 von news.google.com", self.pushed[1].body)
         self.broken = False
         self.tick(60 * 8)
-        self.assertEqual(self.titles()[2:], ["Datenquelle wieder in Ordnung: Medien (Google News)"])
+        self.assertEqual(self.titles()[2:], ["Datenquelle wieder in Ordnung: Medien (Google News, Feeds aus Übersee)"])
+
+    def test_part_of_a_source_failing_is_reported_as_restricted(self):
+        self.tick(0)
+        self.partial = "Google News ohne Antwort (Google News: HTTP 429 von news.google.com)"
+        self.signals = [media("CU", None, at(0), at(30))]  # was der Rest der Quelle liefert, zählt weiter
+        for minute in range(30, 60 * 8, 30):
+            self.assertEqual(self.tick(minute)["signals"], 1)
+        self.assertEqual(self.titles()[1:], ["Datenquelle eingeschränkt: Medien (Google News, Feeds aus Übersee)"])
+        self.assertIn("Seit 26.11. 12:30 Uhr fällt ein Teil dieser Quelle aus (Google News ohne Antwort",
+                      self.pushed[1].body)
+        text = report.Report(self.cfg, self.state, at(60 * 8)).markdown()
+        self.assertIn("| Medien (Google News, Feeds aus Übersee) | eingeschränkt seit 12:30 |", text)
+        self.partial = ""
+        self.tick(60 * 8)
+        self.assertEqual(self.titles()[2:], ["Datenquelle wieder in Ordnung: Medien (Google News, Feeds aus Übersee)"])
+
+    def test_silent_europe_is_one_warning_instead_of_an_alert_per_source(self):
+        fakes = {"frequency": self.european_source("api.energy-charts.info", "dat.netzfrequenzmessung.de"),
+                 "utility": self.european_source("www.linznetz.at")}
+        for name in fakes:
+            self.cfg["sources"][name]["enabled"] = True
+        with mock.patch.dict(collectors.COLLECTORS, fakes):
+            self.tick(0)
+            self.europe_up = False
+            for minute in range(5, 60 * 5, 5):
+                self.tick(minute)
+            self.assertEqual(self.titles()[1:], ["Messquellen in Europa nicht erreichbar"])
+            self.assertEqual(self.pushed[1].level, "warn")
+            current = report.Report(self.cfg, self.state, at(60 * 5))
+            self.assertIn("⚠️ **Seit 12:05 Uhr antwortet keine der Messquellen in Europa (Energy-Charts (Freiburg), "
+                          "netzfrequenzmessung.de (Nürnberg), LINZ NETZ (Linz)), Quellen außerhalb Europas antworten.",
+                          current.markdown())
+            europe = current.snapshot()["europe"]
+            self.assertEqual(europe["silent_since"], iso(at(5)))
+            self.assertEqual([row["reached"] for row in europe["hosts"]], [False, False, False])
+            self.europe_up = True
+            self.tick(60 * 5)
+            self.assertEqual(self.titles()[2:], ["Messquellen in Europa wieder erreichbar"])
+            self.assertIsNone(report.Report(self.cfg, self.state, at(60 * 5)).snapshot()["europe"]["silent_since"])
+            self.assertNotIn("⚠️", report.Report(self.cfg, self.state, at(60 * 5)).markdown())
+
+    def test_single_broken_source_in_europe_is_still_reported(self):
+        fakes = {"frequency": self.european_source("api.energy-charts.info", "dat.netzfrequenzmessung.de")}
+        self.cfg["sources"]["frequency"]["enabled"] = True
+        self.cfg["sources"]["utility"]["enabled"] = True
+
+        def linz(cfg, cursor, now, context):
+            http.JOURNAL.append(("www.linznetz.at", True))
+            return []
+
+        with mock.patch.dict(collectors.COLLECTORS, {**fakes, "utility": linz}):
+            self.tick(0)
+            self.europe_up = False
+            for minute in range(5, 60 * 4, 5):
+                self.tick(minute)
+        self.assertEqual(self.titles()[1:], ["Datenquelle gestört: Netzfrequenz"])
+
+    def test_last_messages_are_part_of_the_status_file(self):
+        # Für die App: Sie holt nach, was als Push nicht ankam.
+        self.tick(0)
+        self.signals = [media("AT-4", 0.026, at(0), at(5), text="1 Medium berichtet, rund 40.000 Betroffene laut Schlagzeilen")]
+        self.offline = True
+        self.tick(5)
+        notices = report.Report(self.cfg, self.state, at(5)).snapshot()["notices"]
+        self.assertEqual([entry["title"] for entry in notices],
+                         ["Stromausfall: Oberösterreich (laut Medien)", "Blackout-Radar ist aktiv: keine größeren Stromausfälle"])
+        waiting, hello = notices
+        self.assertEqual(sorted(waiting), ["body", "delivered", "key", "level", "pending", "t", "title"])
+        self.assertEqual((waiting["level"], waiting["t"], waiting["delivered"], waiting["pending"]),
+                         ("warn", iso(at(5)), [], ["ntfy"]))
+        self.assertIn("Dauer und Ende lassen sich aus Medienberichten nicht ablesen.", waiting["body"])
+        self.assertEqual((hello["level"], hello["t"], hello["delivered"], hello["pending"]),
+                         ("info", iso(at(0)), ["ntfy"], []))
+        self.assertTrue(hello["body"].startswith("Die Überwachung läuft."))
+        self.assertNotIn("thema", json.dumps(notices))  # weder Fehlertexte noch Zugangsdaten
+        self.offline = False
+        self.tick(10)
+        notices = report.Report(self.cfg, self.state, at(10)).snapshot()["notices"]
+        self.assertEqual((notices[0]["key"], notices[0]["delivered"], notices[0]["pending"]),
+                         (waiting["key"], ["ntfy"], []))
+        self.assertEqual(notices[0]["body"], waiting["body"])
 
     def test_outage_in_upper_austria_ends_up_as_push_and_in_the_report(self):
         self.tick(0)
@@ -154,7 +251,7 @@ class CommandLine(Harness):
         status = (self.state_path.parent / "status.md").read_text(encoding="utf-8")
         self.assertIn("# Lagebericht Stromausfälle", status)
         self.assertIn("**Keine größeren Stromausfälle erkannt.**", status)
-        self.assertIn("| Medien (Google News) | in Ordnung |", status)
+        self.assertIn("| Medien (Google News, Feeds aus Übersee) | in Ordnung |", status)
         snapshot = json.loads((self.state_path.parent / "status.json").read_text(encoding="utf-8"))
         self.assertEqual(snapshot["active"], [])
         self.assertEqual(self.titles(), ["Blackout-Radar ist aktiv: keine größeren Stromausfälle"])

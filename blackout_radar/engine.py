@@ -10,6 +10,8 @@ Melderegeln
   Vorrang-Gebiete (z. B. Oberösterreich): sofort, ohne Wartezeit.
   Rest der Welt: erst ab Mindestdauer und Mindestgröße, und nur wenn Strom
   als Ursache belegt ist (Lastdaten, Netzbetreiber, Cloudflare oder Medien).
+  "Europa" (Schlagzeilen, die nur den Kontinent nennen) zählt wie ein Vorrang-Gebiet,
+  wenn das eigene Land in Europa liegt: sofort ab dem Anteil aus priority.min_severity.
 
 Messwerte und Medien
   Messwerte (Stromlast, Netzbetreiber, Internet) bestimmen Beginn, Ende und
@@ -73,7 +75,13 @@ class Engine:
         state.setdefault("history", [])
         self.tz = zone(cfg.get("timezone", "Europe/Vienna"))
         home = {areas.parent(area) for area in self.p["areas"]}
+        self.home = home
         self.near = home | {other for country in home for other in areas.NEIGHBOURS.get(country, ())}
+        # Vorrang-Gebiete, für die die Größenschwelle gilt (alles außer always_areas)
+        self.wide = list(self.p["areas"])
+        if home & areas.EUROPE:
+            self.near.add(areas.EUROPE_WIDE)
+            self.wide.append(areas.EUROPE_WIDE)
 
     # ------------------------------------------------------------------ Ablauf
     def tick(self, signals: list[Signal], now: datetime) -> list[Message]:
@@ -346,31 +354,37 @@ class Engine:
         """Grobe Zahl betroffener Menschen: Spitzen-Anteil mal Einwohner."""
         incidents = event["incidents"]
         countries = {a for a in incidents if areas.parent(a) == a}
-        total = 0.0
+        total, europe, inside = 0.0, 0.0, 0.0
         for area, inc in incidents.items():
             if areas.parent(area) != area and areas.parent(area) in countries:
                 continue  # Bundesland steckt schon im Staat
-            total += (inc.get("peak") or 0.0) * areas.population(area)
-        return total
+            people = (inc.get("peak") or 0.0) * areas.population(area)
+            if area == areas.EUROPE_WIDE:
+                europe = people
+            elif areas.EUROPE_WIDE in incidents and areas.parent(area) in areas.EUROPE:
+                inside += people  # steckt schon in "Europa": es zählt der größere der beiden Werte
+            else:
+                total += people
+        return total + max(europe, inside)
 
     def _notable(self, area, inc) -> bool:
         """Wahr, wenn ein Gebiet für sich allein eine Meldung wert ist."""
         peak = inc.get("peak") or 0.0
         if area in (self.p.get("always_areas") or []):
             return True
-        if area in self.p["areas"] and peak >= self.p["min_severity"]:
+        if area in self.wide and peak >= self.p["min_severity"]:
             return True
         return peak * areas.population(area) >= self.f["min_affected_people"]
 
     def is_priority(self, event) -> bool:
         """Vorrang: ein Gebiet, in dem jedes Signal zählt, oder ein großer Ausfall in einem Vorrang-Gebiet."""
         always = self.p.get("always_areas") or []
-        return any(area in always or (area in self.p["areas"] and (inc.get("peak") or 0.0) >= self.p["min_severity"])
+        return any(area in always or (area in self.wide and (inc.get("peak") or 0.0) >= self.p["min_severity"])
                    for area, inc in event["incidents"].items())
 
     def urgent(self, event) -> bool:
         """Großer Ausfall in einem Vorrang-Gebiet: höchste Dringlichkeit und kurze Abstände."""
-        return any(area in self.p["areas"] and (inc.get("peak") or 0.0) >= self.p["min_severity"]
+        return any(area in self.wide and (inc.get("peak") or 0.0) >= self.p["min_severity"]
                    for area, inc in event["incidents"].items())
 
     def is_near(self, event) -> bool:
@@ -676,7 +690,9 @@ class Engine:
         lines += self.course_lines(event, now)
         if not media_only:
             lines += headlines
-        if phase in HINT_PHASES and kind == "Blackout" and any(areas.parent(i["area"]) == "AT" for i in order):
+        austria = any(areas.parent(i["area"]) == "AT" for i in order) or (
+            "AT" in self.home and areas.EUROPE_WIDE in event["incidents"])
+        if phase in HINT_PHASES and kind == "Blackout" and austria:
             lines.append(APG_HINT)
         return Message(title, "\n".join(lines), level, key, url)
 

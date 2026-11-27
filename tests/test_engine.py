@@ -2,7 +2,7 @@
 import unittest
 from datetime import timedelta
 
-from blackout_radar import simulate
+from blackout_radar import areas, simulate
 from blackout_radar.engine import Engine
 from blackout_radar.model import Signal, parse_ts
 
@@ -267,6 +267,63 @@ class LoadData(unittest.TestCase):
     def test_areas_waiting_for_media_confirmation(self):
         self.engine.tick([internet("AT", 0.5, at(0), at(0)), media("DE", 0.5, at(0), at(0))], at(0))
         self.assertEqual(self.engine.active_areas(), ["AT"])
+
+
+class EuropeWide(unittest.TestCase):
+    """Schlagzeilen, die nur "Europa" nennen: So berichten Medien in Übersee, wenn der Kontinent betroffen ist."""
+
+    def setUp(self):
+        self.engine = Engine(make_cfg(), {})
+
+    def test_blackout_across_europe_is_an_alarm_at_once(self):
+        text = "3 Medien berichten, europaweiter Ausfall laut Schlagzeilen"
+        sent = play(self.engine, lambda minute, now: [media("EU", 0.5, at(-20), now, text=text)], until=0)
+        self.assertEqual(titles(sent), ["Blackout: Europa (laut Medien)"])
+        message = sent[0][1]
+        self.assertEqual(message.level, "alarm")
+        self.assertIn("• Europa: 3 Medien berichten, europaweiter Ausfall laut Schlagzeilen", message.body)
+        self.assertIn("Richtwert der APG", message.body)  # das eigene Land liegt in Europa
+
+    def test_smaller_outage_somewhere_in_europe_follows_the_world_rules(self):
+        share = 2_000_000 / 450_000_000  # "Millions without power as blackout hits Balkans"
+        sent = play(self.engine, lambda minute, now: [media("EU", share, at(0), now)], until=60)
+        self.assertEqual([(minute, message.title, message.level) for minute, message in sent],
+                         [(30, "Stromausfall: Europa (laut Medien)", "warn")])
+
+    def test_europe_of_unknown_size_is_only_watched(self):
+        sent = play(self.engine, lambda minute, now: [media("EU", None, at(0), now)], until=120)
+        self.assertEqual(sent, [])
+        event = next(iter(self.engine.state["events"].values()))
+        self.assertIn("Größe unbekannt", self.engine.hold_reasons(event, at(120)))
+
+    def test_europe_and_its_countries_are_one_event_and_people_count_once(self):
+        def script(minute, now):
+            signals = [media("EU", 0.5, at(0), now)]
+            if minute >= 5:
+                signals.append(media("AT", 0.5, at(5), now))
+            if minute >= 10:
+                signals.append(media("US", 0.01, at(10), now))  # gehört nicht dazu
+            return signals
+
+        sent = play(self.engine, script, until=10)
+        events = sorted(self.engine.state["events"].values(), key=lambda event: event["started_at"])
+        self.assertEqual([sorted(event["incidents"]) for event in events], [["AT", "EU"], ["US"]])
+        self.assertEqual(self.engine.impact(events[0]), 225_000_000)  # Österreich steckt in "Europa"
+        self.assertEqual(titles(sent)[0], "Blackout: Europa (laut Medien)")
+        self.assertIn("Blackout: Österreich, Europa (laut Medien)", self.engine.headline(events[0]))
+
+    def test_related_areas(self):
+        self.assertTrue(areas.related("EU", "AT-4") and areas.related("ES", "EU") and areas.related("EU", "EU"))
+        self.assertFalse(areas.related("EU", "US") or areas.related("EU", "UA") or areas.related("RU", "EU"))
+        self.assertTrue(areas.related("AT", "DE") and not areas.related("AT", "ES"))  # Nachbarn wie bisher
+        self.assertEqual((areas.name("EU"), areas.population("EU")), ("Europa", 450_000_000))
+
+    def test_far_away_home_does_not_treat_europe_as_its_own(self):
+        cfg = make_cfg()
+        cfg["priority"].update({"areas": ["US"], "always_areas": []})
+        engine = Engine(cfg, {})
+        sent = play(engine, lambda minute, now: [media("EU", 0.5, at(0), now)], until=40)
+        self.assertEqual([(minute, message.level) for minute, message in sent], [(30, "info")])
 
 
 class Frequency(unittest.TestCase):

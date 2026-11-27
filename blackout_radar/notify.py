@@ -173,7 +173,10 @@ class Notifier:
             if not item["done"]:
                 log.warning("Meldung nicht zugestellt (%s): %s", message.title,
                             "; ".join(item["errors"].values()) or "kein Kanal eingerichtet")
+            # Mit Text: Der Lagebericht gibt die letzten Meldungen weiter (status.json, "notices"), damit die
+            # App nachholen kann, was der Push nicht zugestellt hat.
             self.sent.insert(0, {"t": item["queued_at"], "title": item["message"]["title"],
+                                 "body": item["message"]["body"],
                                  "level": item["message"]["level"], "key": item["message"]["key"],
                                  "channels": item["done"], "failed": item["pending"]})
         del self.sent[SENT_LOG:]

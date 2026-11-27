@@ -9,24 +9,33 @@ als Ortsangabe, nicht für den Handelnden ("US-Sanktionen", "US embassy urges ..
 
 Für Österreich ist die Liste dichter: Je mehr Orte außerhalb Oberösterreichs bekannt sind,
 desto seltener wird ein Bericht aus einem anderen Bundesland Oberösterreich zugeschlagen.
+
+"Europa" und Teile davon ("Südeuropa", "Balkans") zählen als eigenes Gebiet, aber nur, wenn die
+Schlagzeile sonst kein Gebiet nennt ("Massive blackout hits Europe"). Mit einem Land in derselben
+Schlagzeile ist das Land gemeint ("Spain blackout: Europe's worst power outage"). Als Teil eines Namens
+oder als Besitzer zählt Europa nicht ("Europa League", "Europas größtes Atomkraftwerk ohne Strom").
+
+Für Suchen innerhalb Österreichs gibt es dazu das amtliche Gemeindeverzeichnis (austria()): Es sagt,
+in welchem Bundesland ein Ort liegt, den die Liste hier nicht kennt.
 """
 from __future__ import annotations
 
 import re
 
-from . import areas
+from . import areas, gemeindeliste
 
 SKIP = {"Georgia", "Jordan", "Chad", "Niger", "Tschad"}
 
 # Gebiet: weitere Schreibweisen, Einwohnerbezeichnungen, Regionen und Städte
 _ALIASES = """
 AT-4: Oberösterreich|Upper Austria|Linz|Wels|Steyr|Mühlviertel|Innviertel|Traunviertel|Hausruckviertel|Oberösterreichs|OÖ|Linzer|Welser|Steyrer|Mühlviertler|Innviertler|Urfahr|Kleinmünchen|Ebelsberg|Leonding|Traun|Ansfelden|Pasching|Hörsching|Marchtrenk|Enns|Braunau|Ried im Innkreis|Bezirk Ried|Schärding|Vöcklabruck|Gmunden|Bad Ischl|Kirchdorf an der Krems|Bezirk Kirchdorf|Freistadt|Perg|Bezirk Rohrbach|Eferding|Grieskirchen|Attnang-Puchheim|Mauthausen|Gallneukirchen|Salzkammergut
-AT: Austrian|Autriche|Wien|Vienna|Graz|Salzburg|Innsbruck|Klagenfurt|Tirol|Tyrol|Steiermark|Kärnten|Vorarlberg|Burgenland|Niederösterreich|Österreichs|Lower Austria|Styria|Carinthia|NÖ|Wiener Neustadt|Wiener|St. Pölten|Sankt Pölten|Krems|Amstetten|Mödling|Klosterneuburg|Waldviertel|Weinviertel|Mostviertel|Eisenstadt|Grazer|Leoben|Kapfenberg|Obersteiermark|Kärntner|Villach|Wolfsberg|Osttirol|Lienz|Kufstein|Kitzbühel|Bregenz|Dornbirn|Feldkirch|Bludenz|Pinzgau|Pongau|Lungau
-DE: German|Allemagne|Alemania|Germania|Berlin|München|Munich|Hamburg|Frankfurt|Köln|Cologne|Stuttgart|Bayern|Bavaria
+AT: Austrian|Autriche|Wien|Vienna|Graz|Salzburg|Innsbruck|Klagenfurt|Tirol|Tyrol|Steiermark|Kärnten|Vorarlberg|Burgenland|Niederösterreich|Österreichs|Lower Austria|Styria|Carinthia|NÖ|Wiener Neustadt|Wiener|St. Pölten|Sankt Pölten|Krems|Amstetten|Mödling|Klosterneuburg|Waldviertel|Weinviertel|Mostviertel|Eisenstadt|Grazer|Leoben|Kapfenberg|Obersteiermark|Kärntner|Villach|Wolfsberg|Osttirol|Lienz|Kufstein|Kitzbühel|Bregenz|Dornbirn|Feldkirch|Bludenz|Pinzgau|Pongau|Lungau|Flachgau|Tennengau|Zillertal|Ötztal|Außerfern|Lavanttal|Gailtal|Bregenzerwald|Montafon|Mürztal|Oststeiermark|Weststeiermark|Südsteiermark|Südburgenland|Mittelburgenland|Nordburgenland|Seewinkel|Industrieviertel|Ausseerland
+EU: Europa|Europas|Europe|European|Europe-wide|europaweit|europaweite|europaweiter|europaweiten|europaweitem|europaweites|Europaweiter|Europaweite|Europaweit|Mitteleuropa|Mitteleuropas|Zentraleuropa|Westeuropa|Westeuropas|Südeuropa|Südeuropas|Osteuropa|Südosteuropa|Nordeuropa|Kontinentaleuropa|Balkan|Balkans|Westbalkan|Skandinavien|Scandinavia|Baltikum|Baltics|Baltic states
+DE: German|Allemagne|Alemania|Germania|Berlin|München|Munich|Hamburg|Frankfurt|Köln|Cologne|Stuttgart|Bayern|Bavaria|Europa-Park|Europapark
 CH: Swiss|Suisse|Suiza|Svizzera|Zürich|Zurich|Genf|Geneva|Genève|Basel
 IT: Italian|Italia|Italie|Rom|Rome|Roma|Milano|Mailand|Napoli|Neapel|Turin|Torino|Sicily|Sicilia|Sizilien|Sardinia|Sardegna|Sardinien|Südtirol|Venedig|Venezia
 FR: French|Francia|França|Paris|Marseille|Lyon|Toulouse|Bordeaux|Cannes
-ES: España|Spanish|Espagne|Spagna|Espanha|Madrid|Barcelona|Sevilla|Seville|Andalucía|Cataluña|Catalonia|Canarias|Canary Islands|Kanaren|Tenerife|Teneriffa|Mallorca|Málaga|Bilbao|Zaragoza|Galicia|Asturias|Extremadura|Castilla
+ES: España|Spanish|Espagne|Spagna|Espanha|Iberian Peninsula|Iberische Halbinsel|Península Ibérica|Madrid|Barcelona|Sevilla|Seville|Andalucía|Cataluña|Catalonia|Canarias|Canary Islands|Kanaren|Tenerife|Teneriffa|Mallorca|Málaga|Bilbao|Zaragoza|Galicia|Asturias|Extremadura|Castilla
 PT: Portuguese|Portogallo|Lisbon|Lisboa|Lissabon
 GB: Britain|UK|U.K.|England|Scotland|Wales|Northern Ireland|London|Heathrow|Großbritannien|Schottland|Royaume-Uni|Reino Unido|Gran Bretaña
 IE: Irish|Dublin
@@ -170,6 +179,38 @@ _MONEY_AFTER = re.compile(r"\$|[-\s](?:dollars?|d[oó]lares)\b", re.IGNORECASE)
 # Deutsche Namen, die im Englischen ein gewöhnliches Wort sind ("Island-wide blackout hits Puerto Rico")
 _GERMAN_ONLY = {"Island"}
 
+# "Europa" ist oft nur Teil eines Namens, der Besitzer von etwas Einzelnem oder der Handelnde ("Europa League",
+# "Europa-Center", "Europas größtes Atomkraftwerk ohne Strom", "European Union", "Zugverkehr europaweit
+# gestört"). Als Gebiet zählt es nur, wo der Kontinent selbst als Ort des Ausfalls gemeint ist.
+_EU_BASE = {"Europa", "Europe"}
+# Eigennamen: Wörter mit Bindestrich außer "Europa-Blackout", dazu bekannte Namen mit Leerzeichen
+_EU_NAME_AFTER = re.compile(
+    r"-(?!(?:Blackout|Stromausfall|Stromausfälle)\b)[^\W\d_]|"
+    r"\s+(?:League|Conference|Park|Passage|Cent(?:er|re)|Clipper|Cup|Tour|Hotel|Galerie|Arena|Palast|Point|Press|"
+    r"[12])\b")
+# Besitzanzeigend ("Europas", "Europe's"), als Eigenschaftswort ("European") und als Umstandswort ("europaweit")
+# zählt es nur direkt vor dem Netz, dem Ausfall oder einer Mehrzahl von Orten ...
+_EU_WEAK = {"European", "Europas", "Mitteleuropas", "Westeuropas", "Südeuropas"}
+_EU_WEAK_START = ("europaweit", "europe-wide")
+_EU_POSSESSIVE = re.compile(r"'s|’s")
+_EU_PLACE_AFTER = re.compile(
+    r"(?:'s|’s)?\s+(?:(?:massive|major|huge|widespread|biggest|largest|worst|grö(?:ß|ss)te[rsn]?|massive[rsn]?|"
+    r"gro(?:ß|ss)e[rsn]?|schwerste[rsn]?)\s+)?"
+    r"(?:(?:power|electricity|electrical|energy)\s+(?:grids?|outages?|cuts?|failures?|blackouts?)|grids?|"
+    r"blackouts?|outages?|Stromnetz|Netz|Stromversorgung|Stromausf[aä]lle?|Stromstörung(?:en)?|ohne Strom|"
+    r"kein Strom|countries|nations|cities|capitals)\b", re.IGNORECASE)
+# ... im Deutschen auch nach einer Teilangabe ("in weiten Teilen Europas", "im Süden Europas").
+_EU_PART_BEFORE = re.compile(
+    r"\b(?:Teile[n]?|Hälfte|Großteil|Westen|Osten|Norden|Süden|Mitte|Länder[n]?|Staaten|Regionen|Städte[n]?)\s+$")
+
+
+def _continent(text: str, match) -> bool:
+    """Wahr, wenn mit "Europa" der Kontinent als Ort gemeint ist, nicht ein Name, Besitzer oder Handelnder."""
+    name, rest = match.group(0), text[match.end():]
+    if name in _EU_WEAK or name.lower().startswith(_EU_WEAK_START) or _EU_POSSESSIVE.match(rest):
+        return bool(_EU_PLACE_AFTER.match(rest) or _EU_PART_BEFORE.search(text[: match.start()]))
+    return name not in _EU_BASE or not _EU_NAME_AFTER.match(rest)
+
 
 def _build():
     names: dict[str, str] = {}
@@ -184,7 +225,8 @@ def _build():
         for name in rest.split("|"):
             if name.strip():
                 names[name.strip()] = code.strip()
-    known = {name: code for name, code in names.items() if code in areas.COUNTRIES or code in areas.REGIONS}
+    known = {name: code for name, code in names.items()
+             if code in areas.COUNTRIES or code in areas.REGIONS or code == areas.EUROPE_WIDE}
     pattern = "|".join(re.escape(name) for name in sorted(known, key=len, reverse=True))
     return known, re.compile(rf"(?<!\w)(?:{pattern})(?!\w)(?!-(?:led|backed|based|built|made|style|owned|born|installed|controlled|occupied|annexed|held|appointed|linked|aligned)\b)")
 
@@ -205,6 +247,8 @@ def find(text: str, language: str = "") -> list[str]:
         name, code = match.group(0), _NAMES[match.group(0)]
         if foreign and name in _GERMAN_ONLY:
             continue
+        if code == areas.EUROPE_WIDE and not _continent(text, match):
+            continue
         if name in _SHORT:
             place = _PLACE_AFTER.match(text, match.end())
             if _MONEY_AFTER.match(text, match.end()) or (text[match.end(): match.end() + 1] == "-" and not place):
@@ -216,5 +260,123 @@ def find(text: str, language: str = "") -> list[str]:
         if code not in found:
             found.append(code)
     found = found or short
+    if len(found) > 1 and areas.EUROPE_WIDE in found:
+        found.remove(areas.EUROPE_WIDE)  # mit einem Land in der Schlagzeile ist das Land gemeint
     # Ein Bundesland schließt den Staat ein: "Linz, Österreich" zählt nur für das Bundesland.
     return [code for code in found if not any(other != code and areas.parent(other) == code for other in found)]
+
+
+# --------------------------------------------------------------- Gemeinden in Österreich
+# Namen, die allein nichts aussagen: Wörter der Alltagssprache ("in weiten Teilen", "Straßen", "Brand"),
+# häufige Familiennamen, bekanntere Orte gleichen Namens im Ausland und Vorsilben von Doppelnamen.
+# Mit vollem Namen ("Brand-Nagelberg", "Langen bei Bregenz") werden diese Gemeinden trotzdem erkannt.
+_NOT_ALONE = set("""
+allerheiligen anger baden berg bergland bernstein brand brixen deutsch dorf dörfl fügen gaming going griffen
+gross gutenberg hartl hochburg höchst höfen kaisers kammern kasten klaus klein krakau krumau landl landstrasse
+langen malta manning maria markt mining mühlen münster neubau obdach oberdorf polling raab ratten schützen
+sonntag spital spitz stall strassburg strassen strengen strobl stronach stumm thüringen treffen trieben weiden weiler
+weiten werfen wiesen winden
+""".split())
+# Orte in Oberösterreich, deren Name allein auch einen bekannteren oder grenznahen Ort anderswo meint: in Bayern
+# (Pfarrkirchen, Burgkirchen, Taufkirchen, Kirchheim), Stadtteile (Graz-Liebenau, Berlin-Lichtenberg,
+# Hamburg-Ohlsdorf), Ortsteile in anderen Bundesländern (Wartberg im Mürztal, Rosenau am Sonntagberg, Pichl
+# bei Schladming). Auch sie zählen nur mit vollem Namen. Das Verzeichnis kennt Gemeinden, keine Ortsteile:
+# Gleichnamige Ortsteile anderswo, die hier fehlen, werden Oberösterreich zugeordnet.
+_NOT_ALONE |= set("""
+altenberg altheim aspach auerbach burgkirchen haibach haslach hofkirchen holzhausen innere-stadt julbach
+kirchham kirchheim lichtenberg liebenau mühlheim ohlsdorf pfarrkirchen pichl puchheim rosenau rossbach
+schleissheim steinbach steinhaus taufkirchen thalheim trattenbach wartberg weissenbach
+""".split())
+_NOT_ALONE |= {"st gotthard", "innere stadt"}  # Gotthard in der Schweiz, "Innere Stadt" gibt es auch in Linz und Graz
+_MIN_LETTERS = 5      # kürzere Namen sind meist auch gewöhnliche Wörter (Au, Egg, Hof, Zell, Haus)
+_GENITIVE_LETTERS = 7  # "Tragweins" zählt wie "Tragwein", "Pergs" und "Welser" nicht
+_JOINERS = {"am", "im", "an", "bei", "in", "ob"}
+_AT_WORD = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*")
+_DISTRICT_WORDS = {"bezirks": "bezirk", "bezirkes": "bezirk", "bezirke": "bezirk", "bezirken": "bezirk"}
+
+
+def _plain(text: str) -> str:
+    """Einheitliche Schreibweise: klein, "Sankt" und "St." gleich, ohne Satzzeichen ("St. Georgen" -> "st georgen")."""
+    text = re.sub(r"\b(?:sankt|skt)\b\.?", "st", text.casefold())
+    return " ".join(_AT_WORD.findall(text.replace(".", " ")))
+
+
+def _short(name: str) -> str:
+    """Name ohne Zusatz: "Neumarkt im Mühlkreis" -> "Neumarkt", "Sankt Josef (Weststeiermark)" -> "Sankt Josef"."""
+    words = re.sub(r"\s*\(.*?\)", "", name).split()
+    for index, word in enumerate(words):
+        if index and (word.casefold() in _JOINERS or re.match(r"a\.[a-z]\.", word.casefold())):
+            return " ".join(words[:index])
+    return " ".join(words)
+
+
+def _build_austria() -> tuple[dict, int]:
+    table: dict[str, set] = {}
+
+    def add(key: str, land: str) -> None:
+        key = _plain(key)
+        if key:
+            table.setdefault(key, set()).add(land)
+
+    for land, names in gemeindeliste.GEMEINDEN.items():
+        for name in names.split("|"):
+            short = _short(name)
+            add(name, land)
+            add(short, land)
+            if "-" in short:  # Doppelnamen: "Zwettl-Niederösterreich" heißt im Alltag "Zwettl"
+                for part in short.split("-"):
+                    add(part, land)
+    for name in gemeindeliste.WIEN.split("|"):
+        add(name, "AT-9")
+        if "-" in name:
+            for part in name.split("-"):
+                add(part, "AT-9")
+    usable = {key: lands for key, lands in table.items()
+              if key not in _NOT_ALONE and (" " in key or "-" in key or len(key) >= _MIN_LETTERS)}
+    # Bezirke zählen mit dem Wort davor ("Bezirk Ried", "Bezirk Horn"), dann auch mit kurzem oder mehrdeutigem Namen
+    for land, names in gemeindeliste.BEZIRKE.items():
+        for name in names.split("|"):
+            name = re.sub(r"\((?:Stadt|Land)\)$|\s(?:Stadt|Land)$|^Stadt\s", "", name).strip()
+            for form in {name, _short(name), _short(name).split("-")[0]}:
+                usable.setdefault("bezirk " + _plain(form), set()).add(land)
+            if "-" in name or len(_plain(name)) >= 10:  # "Bruck-Mürzzuschlag", "Südoststeiermark"
+                usable.setdefault(_plain(name), set()).add(land)
+    return usable, max(len(key.split()) for key in usable)
+
+
+_AT_NAMES, _AT_WORDS = _build_austria()
+
+
+def austria(text: str) -> tuple[set, set]:
+    """Bundesländer, deren Gemeinden, Bezirke oder Wiener Bezirke ein Text nennt (amtliches Gemeindeverzeichnis).
+
+    Liefert (sicher, möglich): "sicher" sind Bundesländer, in denen ein genannter Name eindeutig liegt.
+    "möglich" sind die Bundesländer zu Namen, die es in mehreren gibt ("Neumarkt", "Kirchberg").
+    Nur für Berichte gedacht, die eine Suche in Österreich geliefert hat: Viele Namen gibt es auch im Ausland.
+    """
+    tokens = [_DISTRICT_WORDS.get(token, token) for token in _plain(text).split()]
+    certain, possible = set(), set()
+    index = 0
+    while index < len(tokens):
+        for length in range(min(_AT_WORDS, len(tokens) - index), 0, -1):
+            lands = _AT_NAMES.get(" ".join(tokens[index: index + length]))
+            if lands is None and length == 1:
+                lands = _single(tokens[index])
+            if lands:
+                (certain if len(lands) == 1 else possible).update(lands)
+                index += length - 1
+                break
+        index += 1
+    return certain, possible - certain
+
+
+def _single(token: str) -> set | None:
+    """Ein einzelnes Wort: Teile eines Bindestrich-Worts ("Wien-Favoriten") und der Wesfall ("Tragweins")."""
+    if "-" in token:
+        found = set()
+        for part in token.split("-"):
+            found |= _AT_NAMES.get(part) or set()
+        return found or None
+    if token.endswith("s") and len(token) >= _GENITIVE_LETTERS:
+        return _AT_NAMES.get(token[:-1])
+    return None

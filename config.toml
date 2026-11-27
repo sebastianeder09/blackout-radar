@@ -55,6 +55,7 @@
 # max_age_minutes = 180           # ältere Berichte lösen nichts mehr aus
 # world_min_sources = 3           # so viele verschiedene Medien müssen über einen Ausfall berichten
 # quiet_hours = 6                 # so lange ohne neuen Bericht, dann gilt die Lage als beendet
+# followup_days = 7               # so lange gelten Berichte über Ursache und Folgen danach als Aufarbeitung
 
 [sources.ioda]
 # enabled = false                 # weltweite Internet-Ausfälle. Noch nicht gegen echte Daten geprüft.

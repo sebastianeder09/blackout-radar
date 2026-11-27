@@ -316,7 +316,7 @@ def _headlines(query: dict, now, limit: int) -> None:
         kind = kinds[news.phase(title)] if news.relevant(title, language) else "–"
         people = news.count_people(title)
         age = int((now - item["when"]).total_seconds() // 60)
-        print(f"    vor {age:>4} min | {kind:<12} | {','.join(gazetteer.find(title)) or '?':<10} "
+        print(f"    vor {age:>4} min | {kind:<12} | {','.join(gazetteer.find(title, language)) or '?':<10} "
               f"| {fmt_number(people) if people else '–':>9} | {item['domain']} | {title}")
 
 

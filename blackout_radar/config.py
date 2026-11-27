@@ -90,7 +90,9 @@ DEFAULTS: dict = {
                 {"area": "AT-4", "hl": "de", "gl": "AT",
                  "q": "(Stromausfall OR Stromstörung OR \"ohne Strom\") "
                       "(Oberösterreich OR Mühlviertel OR Linz OR Wels OR Steyr OR Freistadt OR Perg)"},
-                {"area": "AT", "hl": "de", "gl": "AT", "min_sources": 2,
+                # named_only: Die Suche findet auch Auslandsberichte österreichischer Medien. Es zählt
+                # nur, was Österreich oder einen Ort dort in der Schlagzeile nennt.
+                {"area": "AT", "hl": "de", "gl": "AT", "min_sources": 2, "named_only": True,
                  "q": "(Blackout OR Stromausfall OR \"ohne Strom\") Österreich"},
             ],
             "world_queries": [

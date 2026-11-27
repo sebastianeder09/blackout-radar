@@ -446,10 +446,10 @@ adb shell input keyevent KEYCODE_BACK
 adb shell am start -n "$PKG/.MainActivity" --es tab lage > /dev/null
 shot 07-lage 3
 # Das App-Symbol, so wie Android es zeichnet: In den App-Infos der Einstellungen steht es oben in der Mitte.
-# Der Ausschnitt davon bleibt auch verkleinert im Protokoll erkennbar.
+# Der Ausschnitt ist so schmal, dass er unverkleinert ins Protokoll kommt: Bildpunkt für Bildpunkt wie am Handy.
 adb shell am start -W -a android.settings.APPLICATION_DETAILS_SETTINGS -d "package:$PKG" > /dev/null 2>&1
 shot 08-app-infos 3
-java -Djava.awt.headless=true "$HERE/Vorschau.java" ausschnitt "$OUT/08-app-infos.png" "$OUT/08b-app-symbol.png" 20 5 60 45 2> /dev/null \
+java -Djava.awt.headless=true "$HERE/Vorschau.java" ausschnitt "$OUT/08-app-infos.png" "$OUT/08b-app-symbol.png" 35 23 30 12 2> /dev/null \
   && log "Bild 08b-app-symbol" || log "Ausschnitt mit dem App-Symbol nicht möglich"
 adb shell input keyevent KEYCODE_HOME
 

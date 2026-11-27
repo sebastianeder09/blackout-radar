@@ -40,11 +40,12 @@ import javax.imageio.stream.MemoryCacheImageOutputStream;
  * Verglichen wird der Streifen zwischen den Höhen "von" und "bis" (Prozent von oben, sonst das ganze
  * Bild). Ende mit 0, wenn sich das Bild dort geändert hat, mit 1, wenn es gleich geblieben ist.
  *
- * Und ein Ausschnitt, damit Kleines wie das App-Symbol auch verkleinert im Protokoll erkennbar bleibt:
+ * Und ein Ausschnitt, damit Kleines wie das App-Symbol im Protokoll erkennbar bleibt:
  *
  *   java android/test/Vorschau.java ausschnitt <bild> <ziel> <links> <oben> <breite> <höhe>
  *
- * Alle vier Angaben in Prozent von Breite und Höhe des Bildes.
+ * Alle vier Angaben in Prozent von Breite und Höhe des Bildes. Ein Ausschnitt, der schmaler ist als die
+ * Breite beim Schreiben, kommt unverkleinert ins Protokoll, also Bildpunkt für Bildpunkt wie am Handy.
  *
  * Braucht nur Java ab Version 11, keine Bibliotheken.
  */
@@ -101,11 +102,11 @@ public class Vorschau {
         }
     }
 
-    /** Verkleinert in Schritten von höchstens der Hälfte, damit Schrift lesbar bleibt. */
+    /** Verkleinert in Schritten von höchstens der Hälfte, damit Schrift lesbar bleibt. Vergrößert wird nie. */
     private static BufferedImage shrink(BufferedImage source, int width) {
         BufferedImage current = source;
         while (true) {
-            int w = Math.max(width, current.getWidth() / 2);
+            int w = current.getWidth() <= width ? current.getWidth() : Math.max(width, current.getWidth() / 2);
             int h = Math.max(1, Math.round(current.getHeight() * (w / (float) current.getWidth())));
             BufferedImage next = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
             Graphics2D g = next.createGraphics();

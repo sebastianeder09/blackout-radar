@@ -447,7 +447,7 @@ details.more li { margin-bottom: 6px; }
 
 .setup { max-width: 520px; margin: 0 auto; padding: 28px 20px 40px; }
 .setup .brand-big { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
-.setup .brand-big .logo { width: 48px; height: 48px; }
+.setup .brand-big .logo { width: 56px; height: 56px; }
 .setup .brand-big b { font-size: 22px; letter-spacing: -.01em; }
 .setup h2 { font-size: 24px; margin-bottom: 10px; letter-spacing: -.01em; }
 .setup .lead { color: var(--muted); font-size: 16px; margin-bottom: 22px; }

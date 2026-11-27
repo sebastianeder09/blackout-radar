@@ -48,11 +48,19 @@
     wifi: '<svg viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5 12.9a10 10 0 0 1 14 0"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/></svg>',
     share: '<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></svg>',
   };
-  // Dasselbe Zeichen wie das App-Symbol (res/drawable/ic_launcher_foreground.xml), als Kachel mit runden Ecken.
-  const LOGO = '<svg class="logo" viewBox="14 14 80 80" aria-hidden="true"><rect x="14" y="14" width="80" height="80" rx="20" fill="#E1F0FF"/>' +
-    '<path d="M24,54 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0" fill="none" stroke="#008FFF" stroke-width="2.4" stroke-opacity="0.22"/>' +
-    '<path d="M31.5,54 a22.5,22.5 0 1,0 45,0 a22.5,22.5 0 1,0 -45,0" fill="#D4EAFF"/>' +
-    '<path d="M57.28,34.32 L43.34,56.46 L52.36,56.46 L49.08,73.68 L64.66,51.54 L55.23,51.54 Z" fill="#008FFF" stroke="#008FFF" stroke-width="2.6" stroke-linejoin="round"/></svg>';
+  // Das Zeichen der App, als Kachel mit runden Ecken: LOGO für die Kopfzeile (das Oval nur mit dem Blitz, Schrift
+  // wäre dort nicht lesbar), LOGO_BIG wie das App-Symbol am Startbildschirm (res/drawable/ic_launcher_foreground.xml,
+  // die Buchstaben sind Pfade).
+  const LOGO = '<svg class="logo" viewBox="16 16 76 76" aria-hidden="true"><rect x="16" y="16" width="76" height="76" rx="19" fill="#F5F9FF"/><defs><linearGradient id="logo-ring-s" gradientUnits="userSpaceOnUse" x1="22.2" y1="0" x2="85.8" y2="0"><stop offset="0" stop-color="#9AA4AD"/><stop offset="1" stop-color="#2D8CFF"/></linearGradient></defs>' +
+    '<path d="M22.2,54 a31.8,17 0 1,0 63.6,0 a31.8,17 0 1,0 -63.6,0" fill="#FFFFFF" stroke="url(#logo-ring-s)" stroke-width="3"/>' +
+    '<path d="M56.24,40.56 L46.72,55.68 L52.88,55.68 L50.64,67.44 L61.28,52.32 L54.84,52.32 Z" fill="#2D8CFF" stroke="#2D8CFF" stroke-width="1.8" stroke-linejoin="round"/>' +
+    '</svg>';
+  const LOGO_BIG = '<svg class="logo" viewBox="18 18 72 72" aria-hidden="true"><rect x="18" y="18" width="72" height="72" rx="18" fill="#F5F9FF"/><defs><linearGradient id="logo-ring" gradientUnits="userSpaceOnUse" x1="22.2" y1="0" x2="85.8" y2="0"><stop offset="0" stop-color="#9AA4AD"/><stop offset="1" stop-color="#2D8CFF"/></linearGradient></defs>' +
+    '<path d="M22.2,54 a31.8,15 0 1,0 63.6,0 a31.8,15 0 1,0 -63.6,0" fill="#FFFFFF" stroke="url(#logo-ring)" stroke-width="2.4"/>' +
+    '<path d="M35.75,58.27 L34.99,56.09 L31.74,56.09 L30.99,58.27 L29.2,58.27 L32.31,49.73 L34.42,49.73 L37.52,58.27 Z M33.37,51.05 L33.33,51.18 Q33.27,51.4 33.18,51.68 Q33.1,51.96 32.14,54.74 L34.59,54.74 L33.75,52.29 L33.49,51.47 Z M45.63,55.81 Q45.63,57.06 44.7,57.72 Q43.77,58.39 41.98,58.39 Q40.33,58.39 39.4,57.81 Q38.47,57.22 38.2,56.04 L39.93,55.76 Q40.1,56.44 40.61,56.74 Q41.12,57.05 42.02,57.05 Q43.89,57.05 43.89,55.91 Q43.89,55.55 43.68,55.31 Q43.46,55.07 43.07,54.92 Q42.68,54.76 41.58,54.54 Q40.62,54.31 40.24,54.18 Q39.87,54.04 39.57,53.85 Q39.26,53.67 39.05,53.41 Q38.84,53.15 38.72,52.8 Q38.6,52.45 38.6,51.99 Q38.6,50.84 39.47,50.22 Q40.34,49.61 42,49.61 Q43.59,49.61 44.38,50.1 Q45.18,50.6 45.41,51.74 L43.68,51.98 Q43.54,51.43 43.13,51.15 Q42.73,50.87 41.96,50.87 Q40.34,50.87 40.34,51.89 Q40.34,52.22 40.51,52.43 Q40.69,52.65 41.02,52.8 Q41.36,52.94 42.4,53.17 Q43.63,53.43 44.16,53.65 Q44.69,53.87 45,54.16 Q45.31,54.46 45.47,54.87 Q45.63,55.27 45.63,55.81 Z M46.95,58.27 L46.95,49.73 L53.65,49.73 L53.65,51.11 L48.73,51.11 L48.73,53.26 L53.29,53.26 L53.29,54.64 L48.73,54.64 L48.73,56.89 L53.9,56.89 L53.9,58.27 Z" fill="#9AA4AD"/>' +
+    '<path d="M68.74,58.27 L68.74,49.73 L70.53,49.73 L70.53,58.27 Z M76.04,51.11 L76.04,58.27 L74.25,58.27 L74.25,51.11 L71.5,51.11 L71.5,49.73 L78.8,49.73 L78.8,51.11 Z" fill="#2D8CFF"/>' +
+    '<path d="M63.08,43.44 L55.6,55.32 L60.44,55.32 L58.68,64.56 L67.04,52.68 L61.98,52.68 Z" fill="#2D8CFF" stroke="#2D8CFF" stroke-width="1.2" stroke-linejoin="round"/>' +
+    '</svg>';
 
   const LEVEL_NAME = { alarm: 'Alarm', warn: 'Warnung', ok: 'Entwarnung', info: 'Meldung', daily: 'Übersicht' };
   const OPEN_DEFAULT = { 'Laufende Ereignisse': true, 'Kürzlich beendet': true };
@@ -794,7 +802,7 @@
       });
       input.value = S.setup.value;
       root.append(
-        el('div', { class: 'brand-big', html: LOGO }, el('b', { text: 'Blackout-Radar' })),
+        el('div', { class: 'brand-big', html: LOGO_BIG }, el('b', { text: 'Blackout-Radar' })),
         el('h2', { text: 'Alarme auf dieses Handy holen' }),
         el('p', { class: 'lead', text: 'Trag das ntfy-Thema ein, an das der Radar seine Meldungen schickt. ' +
           'Es ist derselbe Name, den du am PC in ntfy verwendest.' }),
@@ -871,7 +879,7 @@
         'stimmt der Name nicht ganz. Ist das Thema neu, passt alles.';
     }
     root.append(el('div', { class: 'result ' + kind },
-      el('div', { class: 'brand-big', html: LOGO }, el('b', { text: 'Blackout-Radar' })),
+      el('div', { class: 'brand-big', html: LOGO_BIG }, el('b', { text: 'Blackout-Radar' })),
       el('span', { class: 'big-icon' }, icon(kind === 'warn' ? 'alert' : kind === 'ok' ? 'check' : 'wifi')),
       el('h2', { text: title }),
       el('p', { class: 'lead', text: text }),

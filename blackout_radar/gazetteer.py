@@ -4,7 +4,8 @@ Dient nur dazu, einen Medienbericht einem Staat zuzuordnen (für Oberösterreich
 auch dem Bundesland). Die Liste ist bewusst grob. Mehrdeutige Namen fehlen
 absichtlich, zum Beispiel Georgia (Staat und US-Bundesstaat), Jordan, Chad, Niger. Städte, die es
 auch in den USA gibt (Naples, Venice, St. Petersburg, Melbourne, Odessa), stehen nur in der
-Schreibweise ihres Landes in der Liste.
+Schreibweise ihres Landes in der Liste. Die Kurzformen der USA ("US", "U.S.", "USA") zählen nur
+als Ortsangabe, nicht für den Handelnden ("US-Sanktionen", "US embassy urges ...").
 
 Für Österreich ist die Liste dichter: Je mehr Orte außerhalb Oberösterreichs bekannt sind,
 desto seltener wird ein Bericht aus einem anderen Bundesland Oberösterreich zugeschlagen.
@@ -122,9 +123,9 @@ AZ: Azerbaijani|Baku
 AM: Armenian|Yerevan|Eriwan
 GE: Tbilisi|Tiflis
 AU: Australian|Sydney|Brisbane|Adelaide|Queensland|New South Wales|Tasmania|Western Australia|South Australia
-NZ: Auckland|Christchurch
-US: United States|Estados Unidos|États-Unis|New Mexico|New England|Panama City|Texas|California|Kalifornien|Florida|New York|Louisiana|Michigan|Ohio|Pennsylvania|Illinois|North Carolina|South Carolina|Virginia|Tennessee|Kentucky|Alabama|Mississippi|Oklahoma|Arkansas|Missouri|Wisconsin|Minnesota|Colorado|Arizona|Nevada|Oregon|Massachusetts|New Jersey|Maryland|Hawaii|Alaska|Houston|Dallas|Chicago|Los Angeles|San Francisco|San Diego|Seattle|Miami|Atlanta|Detroit|Boston|Philadelphia|New Orleans|Las Vegas|Indiana|Iowa|Kansas|Nebraska|Utah|Idaho|Montana|Wyoming|Connecticut|Maine|Vermont|New Hampshire|Rhode Island|Delaware|West Virginia|North Dakota|South Dakota|Phoenix|Denver|Austin|San Antonio|Charlotte|Nashville|Memphis|Pittsburgh|Cleveland|Minneapolis|St. Louis|Tampa|Orlando
-CA: Canadian|Canadá|Ontario|Quebec|Québec|British Columbia|Alberta|Manitoba|Nova Scotia|Toronto|Montreal|Montréal|Vancouver|Calgary|Ottawa
+NZ: Auckland|Christchurch|South Island|North Island
+US: United States|Estados Unidos|États-Unis|Etats-Unis|Vereinigte Staaten|Vereinigten Staaten|Stati Uniti|U.S.|US|EE.UU.|EE. UU.|EEUU|EUA|Midwest|Long Island|Staten Island|New Mexico|New England|Panama City|Texas|California|Kalifornien|Florida|New York|Louisiana|Michigan|Ohio|Pennsylvania|Illinois|North Carolina|South Carolina|Virginia|Tennessee|Kentucky|Alabama|Mississippi|Oklahoma|Arkansas|Missouri|Wisconsin|Minnesota|Colorado|Arizona|Nevada|Oregon|Massachusetts|New Jersey|Maryland|Hawaii|Alaska|Houston|Dallas|Chicago|Los Angeles|San Francisco|San Diego|Seattle|Miami|Atlanta|Detroit|Boston|Philadelphia|New Orleans|Las Vegas|Indiana|Iowa|Kansas|Nebraska|Utah|Idaho|Montana|Wyoming|Connecticut|Maine|Vermont|New Hampshire|Rhode Island|Delaware|West Virginia|North Dakota|South Dakota|Phoenix|Denver|Austin|San Antonio|Charlotte|Nashville|Memphis|Pittsburgh|Cleveland|Minneapolis|St. Louis|Tampa|Orlando
+CA: Canadian|Canadá|Ontario|Quebec|Québec|British Columbia|Alberta|Manitoba|Nova Scotia|Vancouver Island|Toronto|Montreal|Montréal|Vancouver|Calgary|Ottawa
 MX: México|Mexique|Mexican|Mexico City|Ciudad de México|Yucatán|Nuevo León|Monterrey|Guadalajara|mexicano|mexicana|CDMX|Puebla|Jalisco|Veracruz|Chiapas|Oaxaca|Sonora|Sinaloa|Tamaulipas|Chihuahua|Coahuila|Quintana Roo|Cancún|Tijuana|Baja California|Campeche|Tabasco|Michoacán|Guanajuato|Querétaro
 CU: Cuban|La Habana|Havana|Havanna|cubano|cubana|Santiago de Cuba|Holguín|Matanzas|Camagüey
 DO: República Dominicana|Dominican Republic|Santo Domingo
@@ -147,11 +148,27 @@ NI: Nicaraguan
 
 # Wer nur als Handelnder vorkommt ("Russia strikes ...", "blames US"), ist nicht betroffen.
 _ACTOR_AFTER = re.compile(
-    r"(?:'s|’s|s)?\s+(?:air\s?|drone\s|missile\s)?(?:strikes?|attacks?|attacked|bombs?|bombing|bombardment|shelling|"
+    r"(?:'s|’s|s)?\s+(?:air\s?|drone\s|missile\s|oil\s|fuel\s|energy\s|trade\s|economic\s|naval\s)?"
+    r"(?:strikes?|attacks?|attacked|bombs?|bombing|bombardment|shelling|"
     r"missiles?|drones?|sanctions|embargo|blockade|offensive|Angriffe?n?|Luftangriffe?n?|Beschuss|Sanktionen|"
     r"ataques?|bombardeos?|sanciones|bloqueo|frappes?|attaques?)\b", re.IGNORECASE)
 _ACTOR_BEFORE = re.compile(r"(?:blames?|blaming|accuses?|beschuldigt|culpa a|acusa a|accuse)\s+(?:the\s+)?$",
                            re.IGNORECASE)
+
+# Kurzformen der USA stehen in Schlagzeilen oft nur für den Handelnden oder Beobachter ("Cuba blackout:
+# US embassy urges ...", "US-Sanktionen"). Als Ort zählen sie nur allein in der Schlagzeile, nach einem
+# Verhältniswort ("in the US", "en EE.UU.") oder als Teil einer Ortsangabe ("US-Ostküste", "US Midwest").
+_SHORT = {"US", "U.S.", "USA", "EE.UU.", "EE. UU.", "EEUU", "EUA"}
+_PLACE_AFTER = re.compile(
+    r"[-\s](?:Ostküste|Westküste|Golfküste|Küste|Bundesstaat(?:en|es)?|Staat(?:en)?|Südstaaten|Stadt|Städten?|"
+    r"Metropole|Großstadt|Millionenstadt|East Coast|West Coast|Gulf Coast|Northeast|Southeast|Midwest|South|"
+    r"states?|cit(?:y|ies)|mainland)\b")
+_PLACE_BEFORE = re.compile(
+    r"\b(?:in|in the|in den|across the|throughout the|over the|an der|an die|vor der|en|en los|nos|negli)\s+$",
+    re.IGNORECASE)
+_MONEY_AFTER = re.compile(r"\$|[-\s](?:dollars?|d[oó]lares)\b", re.IGNORECASE)
+# Deutsche Namen, die im Englischen ein gewöhnliches Wort sind ("Island-wide blackout hits Puerto Rico")
+_GERMAN_ONLY = {"Island"}
 
 
 def _build():
@@ -175,14 +192,29 @@ def _build():
 _NAMES, _PATTERN = _build()
 
 
-def find(text: str) -> list[str]:
-    """Gebiete, die in einer Schlagzeile als betroffen genannt werden, in der Reihenfolge des Auftretens."""
-    found = []
+def find(text: str, language: str = "") -> list[str]:
+    """Gebiete, die in einer Schlagzeile als betroffen genannt werden, in der Reihenfolge des Auftretens.
+
+    language ist die Sprache der Suche, die die Schlagzeile geliefert hat (leer: unbekannt).
+    """
+    foreign = bool(language) and not language.startswith("de")
+    found, short = [], []
     for match in _PATTERN.finditer(text):
         if _ACTOR_AFTER.match(text, match.end()) or _ACTOR_BEFORE.search(text[: match.start()]):
             continue
-        code = _NAMES[match.group(0)]
+        name, code = match.group(0), _NAMES[match.group(0)]
+        if foreign and name in _GERMAN_ONLY:
+            continue
+        if name in _SHORT:
+            place = _PLACE_AFTER.match(text, match.end())
+            if _MONEY_AFTER.match(text, match.end()) or (text[match.end(): match.end() + 1] == "-" and not place):
+                continue  # "US$ 5 Millionen", "US-Präsident", "US-Sanktionen"
+            if not place and not _PLACE_BEFORE.search(text[: match.start()]):
+                if code not in short:
+                    short.append(code)  # zählt nur, wenn die Schlagzeile sonst kein Gebiet nennt
+                continue
         if code not in found:
             found.append(code)
+    found = found or short
     # Ein Bundesland schließt den Staat ein: "Linz, Österreich" zählt nur für das Bundesland.
     return [code for code in found if not any(other != code and areas.parent(other) == code for other in found)]

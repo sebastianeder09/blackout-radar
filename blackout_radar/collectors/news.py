@@ -21,6 +21,11 @@ Was nichts auslöst:
     in Linz: Polizei ermittelt"), dann zählt der Bericht als Erstbericht.
   - Ein einzelner Bericht, dessen Schlagzeile keinen Ort nennt. Er wurde nur von der Suche
     einem Gebiet zugeordnet, deshalb braucht es ein zweites Medium.
+  - Bei der Österreich-Suche jede Schlagzeile, die keinen Ort in Österreich nennt. Die Suche
+    findet auch Auslandsberichte österreichischer Medien ("Stürme an US-Ostküste: Fast eine
+    Million ohne Strom").
+  - Folgen, Ursache und Kritik ("... nach Stromausfall", "Staatsschutz ermittelt"), wenn es
+    im Gebiet in den letzten Tagen schon Berichte über einen Stromausfall gab.
 
 Die RSS-Suche von Google News ist für Feed-Leser gedacht und nicht garantiert. Dieses
 Programm fragt sie sparsam ab (wenige Suchen je Lauf).
@@ -88,6 +93,9 @@ FOLLOWUP = re.compile(
     r"gericht|rückblick|analyse|kommentar|interview|\bschutz|lehren|aufarbeitung|"
     r"tag danach|nachwehen|chronologie|protokoll einer|so erlebte|bisher bekannt|was wir wissen|"
     r"wieder (?:da|hergestellt|versorgt|am netz)|behoben|entwarnung|"
+    r"kritik|kritisier|vorw[uü]rf|fahrlässig|rücktritt|debatte|landtag|sondersitzung|\b(?:övp|spö|fpö|neos|kpö)\b|"
+    r"nachspiel|schadeners|schadensers|millionenschaden|schadenssumme|schadenshöhe|schaden in (?:millionen|höhe)|"
+    r"hintergr[uü]nd|faktencheck|fragen und antworten|wie sicher|wie es dazu|"
     r"^after\b.*(?:blackout|outage)|restor|back online|power returns|power is back|"
     r"report finds|lessons|year after|explained|what we know|"
     r"compensation|lawsuit|\bcourt\b|aftermath|recover|death toll|timeline|"
@@ -99,17 +107,34 @@ FOLLOWUP = re.compile(
 # Ursache und Ermittlungen: am Tag des Ausfalls oft schon in der ersten Schlagzeile, Tage später
 # Aufarbeitung. Ob so ein Bericht etwas auslöst, hängt davon ab, ob die Lage schon bekannt ist.
 CAUSE = re.compile(
-    r"ermittel|ermittlung|staatsschutz|sabotage|sachbeschädigung|vorsatz|anschlag|ursache|rätsel|"
+    r"ermittel|ermittlung|staatsschutz|sabotage|sachbeschädigung|vorsatz|anschlag|rätsel|"
+    r"polizei|kripo|kriminalamt|verfassungsschutz|täter|flüchtig|fahndung|"
+    r"ursache(?! (?:noch |weiter |bislang |bisher |derzeit |zunächst )?(?:unklar|unbekannt|offen))|"
     r"festgenommen|verdächtig|investigat|inquiry|\bprobe\b|what caused|caused by|blam(?:es|ed|ing)|"
     r"investig|hipótesis|causas? del|responsables|atribu[iy]e?|causas? do|enquête|indagin", re.IGNORECASE)
 
+# Folgen: "Verkehrschaos nach Stromausfall" steht am Tag des Ausfalls in der Zeitung, "Kritik nach
+# Stromausfall" in den Tagen danach. Zählt deshalb wie ein Bericht über die Ursache.
+AFTER = re.compile(
+    r"\bnach (?:dem |einem |der |einer |den )?(?:[\w-]+ ){0,2}(?:stromausf[aä]ll|stromstörung|blackout)|"
+    r"\b(?:after|following) (?:the |a |an )?(?:[\w-]+ ){0,2}(?:blackout|power outage|power cut|outage)",
+    re.IGNORECASE)
+
 NATIONWIDE = re.compile(
-    r"nationwide|countrywide|country-wide|entire country|whole country|across the country|entire island|"
-    r"island-?wide|national (?:electric |electrical |power |electricity )?grid collaps|grid collapse|"
-    r"total blackout|complete blackout|completely without power|landesweit|bundesweit|im ganzen land|"
-    r"ganz \w+ ohne strom|todo el país|a nivel nacional|apagón (?:nacional|general|total)|"
-    r"colapso (?:total|del sistema)|tout le pays|em todo o país|apagão (?:nacional|geral)|"
+    r"nationwide|countrywide|country-wide|entire country|whole country|across the country|"
+    r"national (?:electric |electrical |power |electricity )?grid collaps|landesweit|bundesweit|im ganzen land|"
+    r"todo el país|a nivel nacional|apagón nacional|tout le pays|em todo o país|apagão nacional|"
     r"in tutto il paese", re.IGNORECASE)
+# "Alles ohne Strom", ohne das Land zu nennen. In kleinen Staaten ist damit das Land gemeint ("apagón general
+# en Cuba"), in großen meist eine Region, Stadt oder Insel ("apagão geral afeta Manaus", "island-wide outage
+# on Oahu", "Ganz Berlin ohne Strom"). Dort zählt es nur als großer Ausfall.
+WHOLE_AREA = re.compile(
+    r"entire island|whole island|island-?wide|grid collapse|total blackout|complete blackout|"
+    r"completely without power|ganz \w+ ohne strom|apagón (?:general|total)|colapso (?:total|del sistema)|"
+    r"apagão (?:geral|total)", re.IGNORECASE)
+WHOLE_AREA_MAX_POPULATION = 30_000_000
+# Eigene Namen großer Staaten, soweit sie vom deutschen und englischen abweichen
+_OWN_NAMES = {"ES": "España", "MX": "México", "BR": "Brasil", "PE": "Perú", "IT": "Italia", "TR": "Türkiye"}
 
 # Wörter, die einen Ausfall als groß beschreiben, ohne eine Zahl zu nennen
 BIG_WORDS = re.compile(
@@ -126,10 +151,13 @@ _MILLION = re.compile(
     rf"(?:\s+(?:de\s+|d')?({_HOUSEHOLDS}))?", re.IGNORECASE)
 _COUNT = re.compile(rf"(\d{{1,3}}(?:[.,\s]\d{{3}})+|\d{{4,7}})\s*({_HOUSEHOLDS}|{_PERSONS})", re.IGNORECASE)
 _HOUSEHOLD_WORD = re.compile(_HOUSEHOLDS, re.IGNORECASE)
-# Mengenangaben in Worten, größte zuerst. Die Werte sind vorsichtige Untergrenzen.
+# Mengenangaben in Worten, die erste passende zählt ("halbe Million" steht deshalb vor "eine Million").
+# Die Werte sind vorsichtige Untergrenzen.
 _WORD_COUNTS = (
     (re.compile(rf"\b(?:millions|millionen|millones|milhões|milioni)\b{_MONEY}", re.IGNORECASE), 2_000_000),
     (re.compile(r"half a million|halbe million|medio millón|meio milhão", re.IGNORECASE), 500_000),
+    (re.compile(rf"\b(?:eine|einer|a|one|un|um)\s+(?:million|millón|milhão|milione)\b{_MONEY}", re.IGNORECASE),
+     1_000_000),
     (re.compile(r"hundreds of thousands|hunderttausende|cientos de miles|centenares de miles|"
                 r"centenas de milhares|centaines de milliers|centinaia di migliaia", re.IGNORECASE), 200_000),
     (re.compile(r"tens of thousands|zehntausende|decenas de miles|dezenas de milhares|"
@@ -167,10 +195,23 @@ def relevant(title: str, language: str = "") -> bool:
 
 
 def phase(title: str) -> str:
-    """Art des Berichts: "lead" Erstbericht, "cause" Ursache und Ermittlungen, "follow" Aufarbeitung."""
+    """Art des Berichts: "lead" Erstbericht, "cause" Ursache, Ermittlungen und Folgen, "follow" Aufarbeitung."""
     if FOLLOWUP.search(title):
         return "follow"
-    return "cause" if CAUSE.search(title) else "lead"
+    return "cause" if CAUSE.search(title) or AFTER.search(title) else "lead"
+
+
+def nationwide(title: str, area: str) -> bool:
+    """Wahr, wenn die Schlagzeile einen Ausfall im ganzen Gebiet beschreibt."""
+    if NATIONWIDE.search(title):
+        return True
+    if not WHOLE_AREA.search(title):
+        return False
+    if 0 < areas.population(area) <= WHOLE_AREA_MAX_POPULATION:
+        return True
+    # Großer Staat: nur, wenn die Schlagzeile den Staat selbst nennt ("Ganz Deutschland ohne Strom")
+    names = {areas.name(area), areas.name_en(area), _OWN_NAMES.get(area, "")} - {""}
+    return any(re.search(rf"(?<!\w){re.escape(name)}(?!\w)", title, re.IGNORECASE) for name in names)
 
 
 _SECOND_LEVEL = {"co", "com", "org", "net", "gov", "gv", "ac", "or", "edu", "ne", "go"}
@@ -233,9 +274,9 @@ def _note(stories: dict, area: str, item: dict, named: bool = True) -> None:
     people = count_people(item["title"])
     if people:
         story["people"] = max(story["people"] or 0, people)
-    if NATIONWIDE.search(item["title"]):
+    if nationwide(item["title"], area):
         story["nationwide"] = True
-    if BIG_WORDS.search(item["title"]):
+    if BIG_WORDS.search(item["title"]) or WHOLE_AREA.search(item["title"]):
         story["big"] = True
 
 
@@ -271,6 +312,29 @@ def _opens(stories: dict, closed: dict, area: str, when, window, settled: bool) 
     return story is None or when <= parse_ts(story["first"]) + window
 
 
+def _targets(query: dict, title: str, language: str) -> tuple[list, list]:
+    """Gebiete, denen ein Bericht zugeordnet wird, und die Gebiete, die seine Schlagzeile selbst nennt."""
+    named = gazetteer.find(title, language)
+    fixed = query.get("area")
+    if fixed and not named:
+        # Schlagzeile ohne Ort: Die Suche ordnet sie zu. Eine weite Suche ("... Österreich") findet aber
+        # auch Auslandsberichte heimischer Medien, dort zählt nur, was den Ort nennt.
+        return ([] if query.get("named_only") else [fixed]), named
+    # Nennt die Schlagzeile ein anderes Gebiet als die Suche, gilt die Schlagzeile.
+    return ([fixed] if fixed in named else named), named
+
+
+def _remember(stories: dict, closed: dict, targets: list, when) -> None:
+    """Merkt vor, dass es in einem Gebiet ohne offene Lage vor kurzem einen Ausfall gab.
+
+    Berichte über Ursache, Ermittlungen und Folgen gelten dort danach als Aufarbeitung und beginnen
+    keine neue Lage (so lange wie nach dem Ende einer Lage, siehe followup_days).
+    """
+    for area in targets:
+        if area not in stories:
+            closed[area] = max(closed.get(area, ""), iso(when))
+
+
 def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
     stories = cursor.setdefault("stories", {})
     closed = cursor.setdefault("closed", {})  # Gebiet -> letzter Bericht einer beendeten Lage
@@ -291,25 +355,36 @@ def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
     plan += [confirm_query(area) for area in (context.get("active_areas") or [])[: cfg["max_areas_per_run"]]]
 
     signals, errors = [], []
+    if not cursor.get("history"):
+        # Erster Lauf: eine Woche zurückschauen. Sonst zählt die Aufarbeitung eines Ausfalls aus den Tagen
+        # davor ("Staatsschutz ermittelt nach Stromausfall in Linz") als neuer Ausfall.
+        plan = [dict(query, days=cfg["followup_days"]) for query in fixed_queries] + plan
+    failed = False
     for index, query in enumerate(plan):
         if index and PAUSE_SECONDS:
             time.sleep(PAUSE_SECONDS)
+        days = query.get("days", 1)
         try:
-            items = fetch(query["q"] + " when:1d", query.get("hl", "de"), query.get("gl", "AT"), query.get("ceid"))
+            items = fetch(f"{query['q']} when:{days}d", query.get("hl", "de"), query.get("gl", "AT"),
+                          query.get("ceid"))
         except (HttpError, ET.ParseError) as err:
             errors.append(f"Google News: {err}")
+            failed = failed or days > 1
             continue
         language = query.get("hl", "de")
+        if days > 1:
+            for item in items:
+                if now - item["when"] > max_age and relevant(item["title"], language):
+                    _remember(stories, closed, _targets(query, item["title"], language)[0], item["when"])
+            continue
         for item in sorted(items, key=lambda entry: entry["when"]):
             title = item["title"]
-            if now - item["when"] > max_age or item["when"] > now + timedelta(minutes=10):
+            if item["when"] > now + timedelta(minutes=10) or not relevant(title, language):
                 continue
-            if not relevant(title, language):
+            targets, named = _targets(query, title, language)
+            if now - item["when"] > max_age:
+                _remember(stories, closed, targets, item["when"])  # zu alt, um etwas auszulösen
                 continue
-            named = gazetteer.find(title)
-            fixed = query.get("area")
-            # Nennt die Schlagzeile ein anderes Gebiet als die Suche, gilt die Schlagzeile.
-            targets = [fixed] if fixed and (not named or fixed in named) else named
             kind = phase(title)
             for area in targets:
                 lead = kind == "lead" or (
@@ -319,6 +394,8 @@ def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
                                                                 "lead": lead}))
                 if lead:
                     _note(stories, area, item, named=area in named)
+            if kind == "follow":
+                _remember(stories, closed, targets, item["when"])
 
     quiet = timedelta(hours=cfg["quiet_hours"])
     for area, story in list(stories.items()):
@@ -341,6 +418,8 @@ def collect(cfg: dict, cursor: dict, now, context: dict) -> list[Signal]:
     for area in [area for area, last in closed.items() if now - parse_ts(last) > keep]:
         del closed[area]
 
+    if not cursor.get("history") and not failed:
+        cursor["history"] = iso(now)
     cursor["note"] = "; ".join(sorted(set(errors)))
     if plan and len(errors) == len(plan):
         raise HttpError(cursor["note"])

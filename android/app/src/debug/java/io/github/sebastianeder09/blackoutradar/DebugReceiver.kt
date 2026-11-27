@@ -10,9 +10,13 @@ import android.content.Intent
  *
  *   adb shell am broadcast -n io.github.sebastianeder09.blackoutradar/.DebugReceiver \
  *       --es ziel http://10.0.2.2:8765/testthema --es status http://10.0.2.2:8765
+ *
+ * Mit "--ez absturz true" stürzt der Testbau absichtlich ab. Damit prüft der Emulator-Test,
+ * dass er einen Absturz der App auch bemerkt.
  */
 class DebugReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.getBooleanExtra("absturz", false)) error("Absichtlicher Absturz für die Gegenprobe im Emulator-Test")
         val app = context.applicationContext
         val pending = goAsync()
         Thread({

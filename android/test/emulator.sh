@@ -8,7 +8,8 @@
 #
 # Was die App anzeigt, liest seite.py aus der Seite selbst. Ob das Bild am Handy einer Änderung
 # auch folgt, zeigt der Vergleich zweier Bildschirmfotos (Vorschau.java). Am Ende steht die Frage,
-# ob die App im Lauf abgestürzt ist. Ergebnisse (Bilder, Ablauf, Protokolle) landen in $OUT.
+# ob die App im Lauf abgestürzt ist, mit einem absichtlichen Absturz des Testbaus als Gegenprobe.
+# Ergebnisse (Bilder, Ablauf, Protokolle) landen in $OUT.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -91,7 +92,21 @@ changed() {  # Bild1 Bild2 Von Bis: hat sich das Bild zwischen den beiden Höhen
   return $code
 }
 
-incidents() {  # Paket Datei: was Android über Abstürze und Hänger dieses Pakets festgehalten hat (bleibt über Neustarts erhalten)
+# Zwei Stellen, an denen Android Abstürze und Hänger festhält:
+# 1. Die Liste der Prozessenden mit ihrem Grund. Sie reicht nur bis zum letzten Neustart sicher zurück,
+#    deshalb fragt der Test sie vor dem Neustart und am Schluss ab.
+# 2. Die Fehlerberichte (dropbox) mit dem Wortlaut des Fehlers. Sie bleiben über Neustarts erhalten.
+exits() {  # Paket: eine Zeile je Prozessende, z. B. "reason=2 (SIGNALED) subreason=0 (UNKNOWN) status=9"
+  adb shell dumpsys activity exit-info "$1" 2> /dev/null | tr -d '\r' | grep -o 'reason=[0-9].*'
+}
+
+note_exits() {  # Datei: Prozessenden der fertigen App und des Testbaus bis jetzt festhalten
+  { exits "$PKG" | sed 's/^/fertige App: /'; exits "$DBG" | sed 's/^/Testbau: /'; } > "$OUT/$1"
+}
+
+BAD_EXIT='reason=(4|5|6|7) '  # Absturz (Java), Absturz (nativ), Hänger, Start misslungen
+
+reports() {  # Paket Datei: Fehlerberichte von Android zu Abstürzen und Hängern dieses Pakets
   local tag
   for tag in data_app_crash data_app_native_crash data_app_anr; do
     adb shell dumpsys dropbox --print "$tag" 2> /dev/null | tr -d '\r'
@@ -237,6 +252,7 @@ else
 fi
 
 # Neustart des Handys
+note_exits enden-vor-neustart.txt
 adb reboot
 if wait_boot; then
   sleep 25
@@ -277,27 +293,34 @@ adb shell dumpsys activity services "$PKG" > "$OUT/dienste.txt" 2>&1
 rm -f "$OUT/seite-fehler.txt" "$OUT/vergleich-fehler.txt"
 
 # Ist die fertige App oder der Testbau im Lauf abgestürzt oder hängen geblieben?
-found=$(incidents "$PKG" abstuerze.txt)
-if ! grep -q "Drop box contents" "$OUT/abstuerze.txt"; then
-  bad "Abstürze nicht prüfbar: Android gibt seine Aufzeichnungen nicht heraus"
-elif [ -n "$found" ]; then
+note_exits enden-am-schluss.txt
+log "Prozessenden im Lauf: $(sort -u "$OUT/enden-vor-neustart.txt" "$OUT/enden-am-schluss.txt" | tr '\n' ';')"
+died=$(sort -u "$OUT/enden-vor-neustart.txt" "$OUT/enden-am-schluss.txt" | grep -E "$BAD_EXIT")
+found=$(reports "$PKG" fehlerberichte.txt)
+if [ -n "$died" ] || [ -n "$found" ]; then
   bad "Die App ist im Lauf abgestürzt oder hängen geblieben"
-  head -60 <<< "$found"
+  [ -n "$died" ] && echo "$died"
+  [ -n "$found" ] && head -60 <<< "$found"
 else
   ok "Kein Absturz und kein Hänger der App im ganzen Lauf"
 fi
-# Gegenprobe: Ein erzwungener Absturz des Testbaus muss in denselben Aufzeichnungen auftauchen,
+# Gegenprobe: Ein absichtlicher Absturz des Testbaus muss an denselben Stellen auftauchen,
 # sonst wäre die Prüfung darüber nichts wert.
 adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
 sleep 2
-adb shell am crash "$DBG" > /dev/null 2>&1
-seen=""
+before=$(adb shell pidof "$DBG" | tr -d '\r')
+adb shell am broadcast -n "$DBG/$PKG.DebugReceiver" --ez absturz true > /dev/null 2>&1
+listed=nein
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 2
-  incidents "$DBG" gegenprobe.txt > /dev/null && seen=ja && break
+  exits "$DBG" | grep -qE "$BAD_EXIT" && listed=ja && break
 done
-[ -n "$seen" ] && ok "Gegenprobe: ein erzwungener Absturz wird erkannt" \
-  || bad "Gegenprobe: erzwungener Absturz nicht erkannt, die Absturzprüfung ist nicht verlässlich"
+reports "$DBG" gegenprobe.txt > /dev/null && reported=ja || reported=nein
+log "Gegenprobe: Prozess vorher ${before:-keiner}, danach $(adb shell pidof "$DBG" | tr -d '\r' | grep . || echo keiner)." \
+  "In den Prozessenden: $listed ($(exits "$DBG" | grep -E "$BAD_EXIT" | head -1))." \
+  "In den Fehlerberichten: $reported ($(adb shell dumpsys dropbox data_app_crash 2> /dev/null | tr -d '\r' | grep -c 'data_app_crash (') Berichte über Abstürze insgesamt)."
+[ "$listed" = ja ] && ok "Gegenprobe: ein absichtlicher Absturz wird erkannt" \
+  || bad "Gegenprobe: absichtlicher Absturz nicht erkannt, die Absturzprüfung ist nicht verlässlich"
 
 {
   echo "## Emulator-Test, Android API $SDK"

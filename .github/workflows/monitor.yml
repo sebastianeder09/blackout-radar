@@ -1,7 +1,12 @@
 name: Blackout-Radar
+run-name: ${{ inputs.aktion == 'takt' && 'Taktgeber' || 'Blackout-Radar' }}
 
 # Fragt alle 5 Minuten die Datenquellen ab und verschickt Meldungen.
 # Der Zustand (laufende Ereignisse, Statistik, Lagebericht) liegt im Zweig "state".
+#
+# Den Takt gibt eine Kette von Läufen vor (Aktion "takt", siehe README unter "Einrichten", Schritt 4),
+# sobald es die Umgebung "takt" mit Wartezeit gibt. Der Zeitplan unten ist die Reserve: GitHub startet
+# Zeitpläne nur "nach Möglichkeit", oft spät, selten oder in neuen Repositories gar nicht.
 
 on:
   schedule:
@@ -10,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       aktion:
-        description: "lauf = normaler Lauf, test-push = Testmeldung, planspiel = Blackout-Übung (16 Testmeldungen), diagnose = Datenquellen prüfen"
+        description: "lauf = normaler Lauf, test-push = Testmeldung, planspiel = Blackout-Übung (16 Testmeldungen), diagnose = Datenquellen prüfen, takt = Taktgeber starten"
         type: choice
         default: lauf
         options:
@@ -18,19 +23,22 @@ on:
           - test-push
           - planspiel
           - diagnose
+          - takt
 
 permissions:
   contents: write   # Zustand in den Zweig "state" schreiben
-  actions: write    # den eigenen Zeitplan aktiv halten
+  actions: write    # den eigenen Zeitplan aktiv halten und den Taktgeber anstoßen
 
 concurrency:
   # Läufe, die den Zustand verändern, laufen nie gleichzeitig. Handaktionen ohne Zustand warten nicht darauf.
+  # Die Glieder des Taktgebers haben eine eigene Reihe: Es wartet immer nur eines, ein weiteres steht an.
   group: ${{ (github.event_name == 'workflow_dispatch' && inputs.aktion != 'lauf') && format('blackout-radar-{0}', inputs.aktion) || 'blackout-radar' }}
   cancel-in-progress: false
 
 jobs:
   radar:
     name: Radar
+    if: inputs.aktion != 'takt'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -93,6 +101,16 @@ jobs:
           # Der Zweig besteht immer nur aus diesem einen Stand, damit das Repository klein bleibt.
           git push --quiet --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" state
 
+      - name: Taktgeber prüfen
+        # Wartet kein Glied der Kette, obwohl der Taktgeber eingerichtet ist, startet dieser Lauf ein neues.
+        if: always() && env.AKTION == 'lauf'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # Läufe nach Zeitplan laufen immer im Hauptzweig, ihr Ereignis nennt ihn aber nicht.
+          DEFAULT_BRANCH: ${{ github.event_name == 'schedule' && github.ref_name || github.event.repository.default_branch }}
+        run: python3 -m blackout_radar takt --pruefen
+
       - name: Lagebericht anzeigen
         if: always() && env.AKTION == 'lauf'
         run: |
@@ -132,3 +150,26 @@ jobs:
                 commit --quiet --message "Zeitplan aktiv halten"
             git push --quiet origin "HEAD:$GITHUB_REF"
           fi
+
+  takt:
+    # Ein Glied des Taktgebers. Es wartet in der Umgebung "takt" die dort eingestellte Wartezeit ab (dabei
+    # ist kein Rechner belegt), stößt dann das nächste Glied und einen Lauf des Radars an und endet.
+    # Hat die Umgebung keine Wartezeit, endet die Kette hier, statt ohne Pause zu laufen.
+    name: Taktgeber
+    if: github.event_name == 'workflow_dispatch' && inputs.aktion == 'takt'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    # "deployment: false": Die Umgebung dient nur der Wartezeit, ausgeliefert wird nichts.
+    environment:
+      name: takt
+      deployment: false
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Nächstes Glied und Lauf anstoßen
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 -m blackout_radar takt

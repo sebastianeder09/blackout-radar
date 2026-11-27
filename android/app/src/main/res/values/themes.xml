@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Nur der Rahmen: Die Oberfläche selbst ist die eingebaute Seite unter assets/www.
+        Die hellen Leisten (dunkle Symbole) stehen auch hier, damit sie schon beim Start stimmen,
+        bevor MainActivity sie setzt. Die Navigationsleiste kennt das erst ab Android 8.1 (values-v27).
+    -->
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

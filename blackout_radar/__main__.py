@@ -6,6 +6,7 @@
   python -m blackout_radar test-push   Testmeldung an alle eingerichteten Kanäle
   python -m blackout_radar simulate    Planspiel: Blackout in Österreich im Zeitraffer
   python -m blackout_radar probe       Diagnose: jede Datenquelle einmal roh abfragen
+  python -m blackout_radar takt        Taktgeber in GitHub Actions: ein Glied der Kette (siehe takt.py)
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
-from . import collectors, config, probe, report, simulate
+from . import collectors, config, probe, report, simulate, takt
 from .engine import Engine
 from .model import Message, fmt_duration, iso, now_utc, parse_ts, zone
 from .notify import Notifier, scrub, secrets
@@ -249,6 +250,10 @@ def cmd_probe(args) -> int:
     return 0
 
 
+def cmd_takt(args) -> int:
+    return takt.run(check_only=args.pruefen)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="blackout_radar", description="Meldet größere Stromausfälle per Push.")
     parser.add_argument("--config", default="config.toml", help="Konfigurationsdatei (Standard: config.toml)")
@@ -283,6 +288,11 @@ def main(argv: list[str] | None = None) -> int:
     diag.add_argument("--only", help="nur diese Quellen, mit Komma getrennt (load,frequency,news,utility,ioda,ntfy). "
                                      "replay spielt die Lastauswertung an echten Tagen nach")
     diag.set_defaults(func=cmd_probe)
+
+    clock = sub.add_parser("takt", help="Taktgeber in GitHub Actions: nächstes Glied und einen Lauf anstoßen")
+    clock.add_argument("--pruefen", action="store_true",
+                       help="nur nachsehen, ob ein Glied wartet, und sonst eines starten (nach jedem Lauf)")
+    clock.set_defaults(func=cmd_takt)
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stderr)

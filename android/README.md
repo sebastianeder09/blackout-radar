@@ -44,10 +44,19 @@ Android warnt beim Installieren, weil die App nicht aus dem Play Store kommt. Da
 | `app/src/main/java/…/Alerts.kt` | Benachrichtigungskanäle und Anzeige |
 | `app/src/main/assets/www/` | Oberfläche (HTML, CSS, JavaScript in einer WebView, lädt nichts aus dem Netz) |
 | `app/src/debug/` | nur im Testbau: Einrichten per `adb`, unverschlüsselte Verbindung zum nachgestellten Server |
-| `test/` | Emulator-Test, nachgestellter ntfy-Server, Testdaten aus dem Planspiel |
+| `test/emulator.sh` | Emulator-Test: fertige App gegen ntfy.sh, Testbau gegen den nachgestellten Server `fake_ntfy.py` mit Testdaten aus dem Planspiel (`fixtures.py`) |
+| `test/seite.py` | liest im Emulator, was die App gerade anzeigt, und kann Knöpfe drücken (über die Entwickler-Schnittstelle der WebView) |
+| `test/Vorschau.java` | schreibt die Bildschirmfotos verkleinert ins Protokoll und holt sie dort wieder heraus |
 
 Bauen: `cd android && gradle assembleRelease` (Gradle 8.14, JDK 17, Android SDK 35). Tests: `gradle testDebugUnitTest`.
 
-Bei jeder Änderung unter `android/` baut GitHub Actions die App (`.github/workflows/android.yml`), führt die Tests aus und prüft sie in zwei Emulatoren (Android 12 und 15) gegen das echte ntfy.sh: Einrichten per Link, Alarm, Funkloch, Ruhezustand, hart beendete App und Neustart. Nach dem Zusammenführen in `main` erscheint die neue Fassung unter *Releases*.
+Bei jeder Änderung unter `android/` baut GitHub Actions die App (`.github/workflows/android.yml`), führt die Tests aus und prüft sie in zwei Emulatoren (Android 12 und 15) gegen das echte ntfy.sh: Einrichten per Link, Lagebericht, Alarm, Funkloch, Ruhezustand, hart beendete App und Neustart. Nach dem Zusammenführen in `main` erscheint die neue Fassung unter *Releases*.
+
+Die Bildschirmfotos des Emulators liegen in voller Größe als Artefakt `emulator-api-<Nummer>` beim Lauf. In Pull Requests stehen sie zusätzlich verkleinert im Protokoll (Schritt "Bilder verkleinert ins Protokoll"). So holt man sie heraus:
+
+```sh
+gh api repos/sebastianeder09/blackout-radar/actions/jobs/<Nummer des Jobs>/logs > protokoll.txt
+java android/test/Vorschau.java lesen protokoll.txt bilder/
+```
 
 **Signaturschlüssel:** `keystore/blackout-radar.p12` liegt absichtlich offen im Repository (Passwort `blackout-radar`). Android nimmt ein Update nur an, wenn es mit demselben Schlüssel signiert ist. Ein geheimer Schlüssel müsste als Secret hinterlegt werden und schützt nur davor, dass jemand eine gefälschte Fassung baut, die sich als Update installieren lässt. Das setzt voraus, dass man diese Datei selbst aus einer fremden Quelle installiert. Die App kommt nur aus den Releases dieses Repositorys, deshalb überwiegt hier der einfache Betrieb.

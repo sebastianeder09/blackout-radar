@@ -2,13 +2,15 @@
 # Prüft die App in einem laufenden Emulator. Aufruf aus dem Hauptordner des Repositorys.
 #
 # Fertige App (release) gegen das echte ntfy.sh, auf einem Zufallsthema nur für diesen Lauf:
-# Einrichten per Link, Zustellung eines Alarms, Funkloch, Ruhezustand (Doze),
-# abgestürzter Dienst und Neustart des Handys. Testbau (debug) gegen einen nachgestellten
-# Server (android/test/fake_ntfy.py auf Port 8765): Bildschirmfotos mit einem Blackout.
+# Einrichten per Link, Lagebericht des echten Radars, Zustellung eines Alarms, Funkloch,
+# Ruhezustand (Doze), abgestürzter Dienst und Neustart des Handys. Testbau (debug) gegen einen
+# nachgestellten Server (android/test/fake_ntfy.py auf Port 8765): Anzeige bei einem Blackout.
 #
+# Was die App anzeigt, liest seite.py aus der Seite selbst (nicht aus dem Bildschirmfoto).
 # Ergebnisse (Bilder, Ablauf, Protokolle) landen in $OUT.
 set -uo pipefail
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${OUT:-$PWD/ergebnis}"
 APK_DIR="${APK_DIR:-$PWD/apk}"
 PKG=io.github.sebastianeder09.blackoutradar
@@ -44,18 +46,29 @@ wait_notification() {  # Text Sekunden -> gibt die Wartezeit in Sekunden aus
   return 1
 }
 
-ui_dump() {
-  adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1
-  adb pull /sdcard/ui.xml "$OUT/ui.xml" > /dev/null 2>&1
+page() {  # Paket [Ausdruck] -> Text der Seite, wie die App sie gerade zeigt, oder Ergebnis des Ausdrucks
+  python3 "$HERE/seite.py" "$@" 2> "$OUT/seite-fehler.txt"
 }
 
-screen_has() {  # Text, der gerade auf dem Bildschirm steht (WebView-Inhalt eingeschlossen)
-  for _ in 1 2 3 4 5; do
-    ui_dump
-    grep -qF "$1" "$OUT/ui.xml" 2> /dev/null && return 0
+page_has() {  # Paket Text: steht der Text gerade in der Seite der App?
+  local text=""
+  for _ in 1 2 3 4 5 6 7 8; do
+    text=$(page "$1") && grep -qF -- "$2" <<< "$text" && return 0
     sleep 2
   done
+  if [ -s "$OUT/seite-fehler.txt" ]; then
+    log "Seite von $1 nicht lesbar: $(tr '\n' ' ' < "$OUT/seite-fehler.txt")"
+  else
+    log "Seite von $1 zeigt nicht \"$2\", sondern: $(head -c 300 <<< "$text" | tr '\n' '|')"
+  fi
   return 1
+}
+
+layout() {  # Paket Name: Kopfzeile oben, Leiste unten, nichts ragt seitlich hinaus (aufbau.js)
+  local verdict
+  verdict=$(page "$1" "$(cat "$HERE/aufbau.js")")
+  log "Aufbau $2: ${verdict:-nicht lesbar}"
+  [[ "$verdict" == ok* ]]
 }
 
 service_running() { adb shell dumpsys activity services "$1/.ListenerService" 2> /dev/null | grep -q "ServiceRecord"; }
@@ -86,36 +99,47 @@ for p in $PKG $DBG; do
   adb shell dumpsys deviceidle whitelist +"$p" > /dev/null
 done
 
+log "Bildschirm: $(adb shell wm size | tr -d '\r' | tr '\n' ' ')$(adb shell wm density | tr -d '\r' | tr '\n' ' ')"
+
 # ------------------------------------------------------------ Testbau: Blackout
 adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
-shot 00-einrichten 4
+page_has "$DBG" "Alarme auf dieses Handy holen" && ok "Testbau: Einrichten wird angezeigt" || bad "Testbau: Einrichten fehlt"
+shot 00-einrichten
 adb shell am broadcast -n "$DBG/$PKG.DebugReceiver" --es ziel http://10.0.2.2:8765/testthema --es status http://10.0.2.2:8765 > /dev/null
-sleep 8
+sleep 4
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab lage > /dev/null
-shot 10-blackout-lage 4
-screen_has "Laufender Stromausfall" && ok "Testbau: Lagebericht mit laufendem Blackout angezeigt" || bad "Testbau: Lagebericht fehlt"
+page_has "$DBG" "Laufender Stromausfall" && ok "Testbau: Lagebericht mit laufendem Blackout angezeigt" || bad "Testbau: Lagebericht fehlt"
+shot 10-blackout-lage
+layout "$DBG" "Testbau" && ok "Testbau: Kopfzeile und Leiste sitzen richtig" || bad "Testbau: Aufbau der Seite stimmt nicht"
+curl -sS -H "Title: Testbau live" -H "Priority: 4" -H "Tags: warning" -d "Zustellung im Testbau" http://127.0.0.1:8765/testthema > /dev/null
+if t=$(wait_notification "Testbau live" 40); then ok "Testbau: neue Meldung nach $t s als Benachrichtigung"; else bad "Testbau: neue Meldung nicht als Benachrichtigung"; fi
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab meldungen > /dev/null
-shot 11-blackout-meldungen 2
+page_has "$DBG" "Testbau live" && ok "Testbau: neue Meldung steht in der Liste" || bad "Testbau: neue Meldung fehlt in der Liste"
+shot 11-blackout-meldungen
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
-shot 12-blackout-app 2
+page_has "$DBG" "Meldungen kommen sofort an" && ok "Testbau: Verbindung wird als bestehend angezeigt" || bad "Testbau: Anzeige der Verbindung stimmt nicht"
+shot 12-blackout-app
 adb shell cmd uimode night yes > /dev/null
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab lage > /dev/null
-shot 13-blackout-lage-dunkel 4
+sleep 2
+[ "$(page "$DBG" "document.documentElement.getAttribute('data-theme')")" = "dark" ] \
+  && ok "Testbau: dunkle Darstellung folgt dem Handy" || bad "Testbau: dunkle Darstellung nicht übernommen"
+shot 13-blackout-lage-dunkel
 adb shell cmd uimode night no > /dev/null
-curl -sS -H "Title: Testbau live" -H "Priority: 4" -H "Tags: warning" -d "Zustellung im Testbau" http://127.0.0.1:8765/testthema > /dev/null
-if t=$(wait_notification "Testbau live" 40); then ok "Testbau: neue Meldung nach $t s angezeigt"; else bad "Testbau: neue Meldung nicht angezeigt"; fi
 adb shell am force-stop "$DBG"
 
 # ------------------------------------------------- Fertige App gegen ntfy.sh
 publish "CI Vorab" 3 zap "Diese Meldung lag schon vor dem Einrichten auf dem Thema."
 sleep 3
 adb shell am start -W -a android.intent.action.VIEW -d "blackoutradar://abo/$TOPIC" -p "$PKG" > /dev/null
-sleep 6
-shot 01-eingerichtet 2
-screen_has "Meldung der letzten 12 Stunden" && ok "Einrichten per Link: Thema übernommen, vorhandene Meldung gefunden" \
+page_has "$PKG" "Meldung der letzten 12 Stunden" && ok "Einrichten per Link: Thema übernommen, vorhandene Meldung gefunden" \
   || bad "Einrichten per Link: Ergebnis nicht wie erwartet"
-adb shell am start -n "$PKG/.MainActivity" --es tab lage > /dev/null
-shot 02-lage 5
+shot 01-eingerichtet
+page "$PKG" "document.querySelector('.result .btn.primary').click()" > /dev/null  # Knopf "Weiter"
+page_has "$PKG" "Lagebericht des Blackout-Radars" && ok "Lagebericht des echten Radars geladen und angezeigt" \
+  || bad "Lagebericht des echten Radars fehlt"
+shot 02-lage
+layout "$PKG" "fertige App" && ok "Kopfzeile und Leiste sitzen richtig" || bad "Aufbau der Seite stimmt nicht"
 
 for _ in $(seq 1 30); do service_running "$PKG" && break; sleep 1; done
 service_running "$PKG" && ok "Hintergrunddienst läuft" || bad "Hintergrunddienst läuft nicht"
@@ -186,17 +210,24 @@ else
   bad "Emulator kam nach dem Neustart nicht hoch"
 fi
 
+# Nach dem Neustart: Die Liste muss alles enthalten, was in diesem Lauf kam (auch von vor dem Neustart).
 adb shell am start -W -n "$PKG/.MainActivity" --es tab meldungen > /dev/null
-shot 04-meldungen 4
+missing=""
+for title in "CI Vorab" "CI Alarm live" "CI Funkloch" "CI Ruhezustand" "CI Nach Neustart"; do
+  page_has "$PKG" "$title" || missing="$missing \"$title\""
+done
+[ -z "$missing" ] && ok "Liste der Meldungen vollständig, auch nach dem Neustart" || bad "In der Liste der Meldungen fehlt:$missing"
+shot 04-meldungen
 adb shell am start -n "$PKG/.MainActivity" --es tab app > /dev/null
-shot 05-app 3
+page_has "$PKG" "Meldungen kommen sofort an" && ok "Verbindung wird als bestehend angezeigt" || bad "Anzeige der Verbindung stimmt nicht"
+shot 05-app
 adb shell am start -n "$PKG/.MainActivity" --es tab lage > /dev/null
-shot 06-lage 4
+shot 06-lage 3
 
 adb logcat -d > "$OUT/logcat.txt" 2>&1
 adb shell dumpsys notification --noredact > "$OUT/benachrichtigungen.txt" 2>&1
 adb shell dumpsys activity services "$PKG" > "$OUT/dienste.txt" 2>&1
-rm -f "$OUT/ui.xml"
+rm -f "$OUT/seite-fehler.txt"
 
 {
   echo "## Emulator-Test, Android API $SDK"

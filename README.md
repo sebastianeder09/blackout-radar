@@ -40,7 +40,9 @@ Zuerst wieder versorgt: Tschechien 05:36
 
 ## Einrichten
 
-**1. Push aufs Handy (ntfy)**
+**1. Push aufs Handy**
+
+Für Android gibt es eine eigene App mit Alarmton, Lagebericht und Wächter: [android/README.md](android/README.md), Download unter <https://github.com/sebastianeder09/blackout-radar/releases/latest/download/blackout-radar.apk>. Sie braucht nur das Thema aus Schritt 2. Alternativ geht die allgemeine App **ntfy**:
 
 1. App **ntfy** installieren (Android: Play Store oder F-Droid, iPhone: App Store).
 2. In der App auf "+" tippen und das Thema eintragen. Das Thema ist ein langer Zufallsname und wirkt wie ein Passwort: Wer es kennt, kann mitlesen.
@@ -176,5 +178,7 @@ Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anze
 | `tests/gegenprobe.py` | Gegenprobe der Lastauswertung mit gedachten Ausfällen in echten Reihen: `python3 -m tests.gegenprobe` |
 | `.github/workflows/monitor.yml` | Lauf alle 5 Minuten, Zustand im Zweig `state` |
 | `.github/workflows/ci.yml` | Tests und Probelauf gegen die echten Datenquellen bei jeder Änderung |
+| `android/` | Android-App: Push über ntfy, Alarmton, Lagebericht, siehe [android/README.md](android/README.md) |
+| `.github/workflows/android.yml` | baut die App, prüft sie im Emulator und veröffentlicht sie unter *Releases* |
 
 Datenquellen: Energy-Charts (Fraunhofer ISE, Daten von ENTSO-E, CC BY 4.0, energy-charts.info), netzfrequenzmessung.de, Google News, Störmeldungen der LINZ NETZ GmbH.

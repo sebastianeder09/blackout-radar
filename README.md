@@ -68,11 +68,27 @@ Zugangsdaten gehören nie in `config.toml`, weil das Repository öffentlich ist.
 
 **3. Einschalten**
 
-Sobald die Datei `.github/workflows/monitor.yml` im Hauptzweig `main` liegt, startet GitHub den Lauf alle 5 Minuten von selbst. Die erste Meldung "Blackout-Radar ist aktiv" kommt, sobald ein Kanal eingerichtet ist.
+Sobald die Datei `.github/workflows/monitor.yml` im Hauptzweig `main` liegt, ist der Radar eingeschaltet. Die erste Meldung "Blackout-Radar ist aktiv" kommt mit dem ersten Lauf, sobald ein Kanal eingerichtet ist. GitHub soll den Lauf alle 5 Minuten starten, tut das aber nur "nach Möglichkeit". Deshalb gehört Schritt 4 dazu.
+
+**4. Taktgeber einschalten**
+
+GitHub startet Zeitpläne nicht verlässlich: Läufe kommen oft nur alle 15 bis 50 Minuten und in neuen Repositories anfangs manchmal gar nicht. Der Taktgeber macht den Radar davon unabhängig. Er ist eine Kette von Läufen: Jedes Glied wartet 5 Minuten, stößt dann das nächste Glied und einen Lauf des Radars an und endet. Während des Wartens ist bei GitHub kein Rechner belegt. Je Runde kommt zum Lauf des Radars nur ein zweiter, wenige Sekunden langer Lauf dazu.
+
+Eingeschaltet wird er mit einer Einstellung im Repository:
+
+1. *Settings → Environments → New environment*, als Name `takt` eintragen, "Configure environment".
+2. "Wait timer" ankreuzen, `5` eintragen, "Save protection rules".
+
+Der nächste Lauf des Radars startet die Kette von selbst. Sofort geht es von Hand unter *Actions → Blackout-Radar → Run workflow* mit der Aktion `takt`. In der Liste der Läufe heißen die Glieder "Taktgeber", eines davon steht immer auf "Waiting".
+
+- **Reißt die Kette**, etwa bei einer Störung von GitHub, startet sie der nächste Lauf des Radars neu, egal ob er nach Zeitplan oder von Hand kommt.
+- **Ohne Wartezeit läuft die Kette nicht.** Ein Glied, das nicht gewartet hat, bricht ab, statt ohne Pause weiterzumachen.
+- **Abschalten:** die Wartezeit entfernen oder die Umgebung `takt` löschen. Die Kette endet dann mit dem nächsten Glied.
+- Wartezeiten bietet GitHub in öffentlichen Repositories kostenlos an, in privaten nur mit bezahltem Plan.
 
 ## Bedienen
 
-Unter *Actions → Blackout-Radar → Run workflow* gibt es vier Aktionen:
+Unter *Actions → Blackout-Radar → Run workflow* gibt es fünf Aktionen:
 
 | Aktion | Wirkung |
 |---|---|
@@ -80,6 +96,7 @@ Unter *Actions → Blackout-Radar → Run workflow* gibt es vier Aktionen:
 | `test-push` | schickt eine Testmeldung an alle eingerichteten Kanäle |
 | `planspiel` | spielt einen Blackout in Österreich im Zeitraffer durch und schickt 16 Meldungen mit dem Vermerk [TEST] |
 | `diagnose` | fragt jede Datenquelle einmal ab und zeigt die Antworten im Protokoll |
+| `takt` | startet den Taktgeber (Einrichten, Schritt 4). Selten nötig, weil jeder Lauf ihn von selbst startet |
 
 **Lagebericht:** <https://github.com/sebastianeder09/blackout-radar/blob/state/status.md>
 
@@ -145,7 +162,7 @@ Italien und Slowenien werden nicht überwacht: Ihre Lastwerte waren bei der Prü
 - **Feiertage kennt das Programm nicht.** Ein Feiertag allein löst keinen Befund aus (geprüft an Weihnachten, Neujahr, Dreikönig und 1. Mai). Fällt ein Ausfall aber auf einen Feiertag oder einen Tag direkt davor oder danach, sind Tiefe und Ende aus den Lastdaten ungenau: Die Entwarnung kann einen halben Tag zu spät kommen, und ein Einbruch um ein Viertel kann unerkannt bleiben.
 - **Verlauf innerhalb Österreichs:** Gemessen wird je Land. Welches Bundesland zuerst wieder Strom hat, lässt sich aus offenen Daten nicht ablesen. Für Oberösterreich gibt es nur Medienberichte und die Störmeldungen der LINZ NETZ (Linz und Umgebung).
 - **Wann das Netz wieder läuft**, kann niemand vorhersagen. Die Meldung nennt bei einem Blackout in Österreich den Richtwert der APG aus Simulationen (2021): im besten Fall etwa 10 Stunden, längstens 20 bis 30 Stunden ([ORF](https://orf.at/stories/3230171/)). Eine Studie für das Parlament (2022) nennt 10 bis 24 Stunden bis zu einem voll versorgten Übertragungsnetz ([Trending Topics](https://www.trendingtopics.eu/blackout-oesterreich-studie/)).
-- **GitHub** startet geplante Läufe nicht pünktlich. Verzögerungen von 5 bis 20 Minuten sind normal, einzelne Läufe fallen aus. Nach einer Lücke von 90 Minuten kommt eine Meldung.
+- **GitHub** startet geplante Läufe nur "nach Möglichkeit": oft spät, selten oder in neuen Repositories gar nicht. Deshalb gibt es den Taktgeber (Einrichten, Schritt 4). Auch er hängt an GitHub: Bei einer Störung dort kann die Kette reißen, bis der nächste Lauf sie neu startet. Nach einer Lücke von 90 Minuten kommt eine Meldung.
 - **Zeitplan bei GitHub:** GitHub schaltet Zeitpläne ab, wenn in einem öffentlichen Repository 60 Tage lang nichts geschieht. Der Ablauf wirkt dem selbst entgegen: Einmal pro Woche bestätigt er seinen Zeitplan, und nach 45 Tagen ohne Änderung setzt er einen Vermerk in den Hauptzweig (`.github/zeitplan-aktiv`). Ob das auf Dauer reicht, zeigt erst die Zeit. Bleibt die tägliche Übersicht aus, lässt sich der Ablauf unter *Actions → Blackout-Radar* mit "Enable workflow" wieder einschalten.
 - **ntfy.sh** begrenzt die kostenlose Nutzung je Absender-Adresse, und GitHub-Läufe teilen sich Adressen mit anderen Nutzern. Eine abgewiesene Meldung wird bei den nächsten Läufen erneut versucht, bis zu 12 Stunden lang. E-Mail ist der zweite Weg. Wer das ausschließen will, betreibt einen eigenen ntfy-Server (`NTFY_SERVER`).
 - **Google News** bietet die Suche als RSS für Feed-Leser an, ohne Zusage. Fällt eine Quelle 3 Stunden aus, kommt eine Meldung.
@@ -174,6 +191,7 @@ Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anze
 | `blackout_radar/notify.py` | Versand über ntfy und E-Mail mit Wiederholung |
 | `blackout_radar/report.py` | Lagebericht, Statistik, tägliche Übersicht |
 | `blackout_radar/simulate.py` | Planspiel |
+| `blackout_radar/takt.py` | Taktgeber: die Kette von Läufen bei GitHub und ihre Sicherungen |
 | `tests/` | Tests, laufen ohne Netz: `python3 -m unittest discover -s tests -t .` |
 | `tests/gegenprobe.py` | Gegenprobe der Lastauswertung mit gedachten Ausfällen in echten Reihen: `python3 -m tests.gegenprobe` |
 | `.github/workflows/monitor.yml` | Lauf alle 5 Minuten, Zustand im Zweig `state` |

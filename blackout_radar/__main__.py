@@ -132,7 +132,12 @@ def tick(cfg: dict, state: dict, now, deliver: bool = True, notice: str | None =
     state.setdefault("created", iso(now))
     engine = Engine(cfg, state)
     http.drain()  # Anfragen von vor diesem Lauf (Versand) zählen nicht für die Erreichbarkeit
-    signals, health = collectors.collect_all(cfg, state, now, {"active_areas": engine.active_areas()})
+    # Verdacht auf einen großen Ausfall in Europa: Die Messquellen dort schweigen oder die Netzfrequenz schlägt
+    # aus. Dann fragt die Quelle "news" alle Feeds aus Übersee in jedem Lauf.
+    wide = reach.silent_since(state) is not None or any(
+        event["kind"] == "frequency" and not event["ended_at"] for event in state["events"].values())
+    context = {"active_areas": engine.active_areas(), "wide": wide}
+    signals, health = collectors.collect_all(cfg, state, now, context)
     messages = engine.tick(signals, now)
     messages += reach.update(cfg, state, now, http.drain())
     messages += upkeep(cfg, state, now, notice)

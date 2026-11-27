@@ -362,7 +362,8 @@ def probe_feeds(cfg: dict, now) -> None:
         working += bool(items)
         items.sort(key=lambda item: item["when"], reverse=True)
         hits = [item for item in items if news.relevant(item["title"], query["hl"])]
-        newest = f"neuester vor {int((now - items[0]['when']).total_seconds() // 60)} min" if items else "ohne Einträge"
+        age = max(0, int((now - items[0]["when"]).total_seconds() // 60)) if items else 0  # Uhren gehen ungleich
+        newest = f"neuester vor {age} min" if items else "ohne Einträge"
         print(f"  {name} ({query['hl']}): {len(items)} Einträge, {newest}, {len(hits)} über einen Stromausfall")
         for item in hits[:5]:
             print(_line(query, item, now, lands))

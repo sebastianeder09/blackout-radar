@@ -177,7 +177,8 @@ _HOUSEHOLDS = (r"haushalte|households|homes|customers|kunden|anlagen|clientes|us
 _PERSONS = r"menschen|people|personen|einwohner|residents|personas|habitantes|pessoas|personnes|persone"
 _MONEY = r"(?!\s*(?:de\s+)?(?:euros?|dollars?|dólares|usd|eur|€|\$|pesos|reais|pounds?|franken))"
 _MILLION = re.compile(
-    rf"(\d+(?:[.,]\d+)?)\s*(?:million|millionen|mio\.?|millones|milhões|millions|milioni)\b{_MONEY}"
+    rf"(\d+(?:[.,]\d+)?)\s*(?:million|millionen|mio\.?|millones|millón|milhões|milhão|millions|milioni|milione)"
+    rf"\b{_MONEY}"
     rf"(?:\s+(?:de\s+|d')?({_HOUSEHOLDS}))?", re.IGNORECASE)
 _COUNT = re.compile(rf"(\d{{1,3}}(?:[.,\s]\d{{3}})+|\d{{4,7}})\s*({_HOUSEHOLDS}|{_PERSONS})", re.IGNORECASE)
 _HOUSEHOLD_WORD = re.compile(_HOUSEHOLDS, re.IGNORECASE)
@@ -448,6 +449,15 @@ def _label(query: dict) -> str:
     return GOOGLE
 
 
+def _all_feeds(cursor: dict, context: dict) -> bool:
+    """Wahr bei Verdacht auf einen großen Ausfall in Europa: Dann kommen alle Feeds in jedem Lauf an die Reihe.
+
+    Der Verdacht besteht, wenn die Messquellen in Europa schweigen oder die Netzfrequenz ausschlägt (context
+    "wide"), oder sobald ein erstes Medium "Europa" als betroffen nennt.
+    """
+    return bool(context.get("wide")) or areas.EUROPE_WIDE in (cursor.get("stories") or {})
+
+
 def _plan(cfg: dict, cursor: dict, context: dict) -> list[dict]:
     """Abfragen dieses Laufs: Vorrang-Suchen, Welt-Suchen und Feeds reihum, Nachweis-Suchen."""
     plan = list(cfg.get("priority_queries") or [])
@@ -461,6 +471,8 @@ def _plan(cfg: dict, cursor: dict, context: dict) -> list[dict]:
     if feeds:
         start = cursor.get("feed_rotation", 0) % len(feeds)
         count = min(cfg.get("feeds_per_run", 0), len(feeds))
+        if count and _all_feeds(cursor, context):
+            count = len(feeds)
         plan += [feed_query(feeds[(start + step) % len(feeds)]) for step in range(count)]
         cursor["feed_rotation"] = (start + count) % len(feeds)
     return plan

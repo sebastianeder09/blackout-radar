@@ -15,7 +15,7 @@ from blackout_radar.engine import Engine
 from blackout_radar.http import HttpError
 from blackout_radar.model import iso
 
-from .helpers import at, make_cfg, media
+from .helpers import at, frequency, make_cfg, media
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -30,6 +30,7 @@ class Harness(unittest.TestCase):
         self.europe_up = True  # False: die Messquellen in Europa antworten nicht
         self.offline = False   # True: der Push-Dienst nimmt nichts an
         self.pushed = []       # zugestellte Meldungen
+        self.wide = []         # je Lauf: Verdacht auf einen großen Ausfall in Europa (für die Quelle "news")
         sources = mock.patch.dict(collectors.COLLECTORS, {"news": self.fake_news}, clear=True)
         senders = mock.patch.dict(notify.SENDERS, {"ntfy": self.fake_push})
         sources.start()
@@ -40,6 +41,7 @@ class Harness(unittest.TestCase):
         self.addCleanup(logging.disable, logging.NOTSET)
 
     def fake_news(self, cfg, cursor, now, context):
+        self.wide.append(context["wide"])
         if self.broken:
             raise HttpError("HTTP 503 von news.google.com")
         http.JOURNAL.append(("news.google.com", True))
@@ -155,6 +157,9 @@ class Upkeep(Harness):
                 self.tick(minute)
             self.assertEqual(self.titles()[1:], ["Messquellen in Europa nicht erreichbar"])
             self.assertEqual(self.pushed[1].level, "warn")
+            # Ab dem Lauf nach der Warnung fragt die Quelle "news" alle Feeds aus Übersee (Verdacht).
+            self.assertEqual(self.wide[:5], [False, False, False, False, True])
+            self.assertTrue(all(self.wide[4:]))
             current = report.Report(self.cfg, self.state, at(60 * 5))
             self.assertIn("⚠️ **Seit 12:05 Uhr antwortet keine der Messquellen in Europa (Energy-Charts (Freiburg), "
                           "netzfrequenzmessung.de (Nürnberg), LINZ NETZ (Linz)), Quellen außerhalb Europas antworten.",
@@ -165,8 +170,21 @@ class Upkeep(Harness):
             self.europe_up = True
             self.tick(60 * 5)
             self.assertEqual(self.titles()[2:], ["Messquellen in Europa wieder erreichbar"])
+            self.tick(60 * 5 + 5)
+            self.assertEqual(self.wide[-1], False)
             self.assertIsNone(report.Report(self.cfg, self.state, at(60 * 5)).snapshot()["europe"]["silent_since"])
             self.assertNotIn("⚠️", report.Report(self.cfg, self.state, at(60 * 5)).markdown())
+
+    def test_frequency_alarm_puts_europe_under_suspicion(self):
+        self.tick(0)
+        self.signals = [frequency(49.6, at(5), at(5))]
+        self.tick(5)
+        self.tick(10)
+        self.assertEqual(self.wide, [False, False, True])  # ab dem Lauf nach dem Alarm
+        self.signals = [frequency(None, at(5), at(40))]
+        for minute in range(15, 90, 5):
+            self.tick(minute)
+        self.assertEqual(self.wide[-1], False)  # die Frequenz ist wieder ruhig
 
     def test_single_broken_source_in_europe_is_still_reported(self):
         fakes = {"frequency": self.european_source("api.energy-charts.info", "dat.netzfrequenzmessung.de")}

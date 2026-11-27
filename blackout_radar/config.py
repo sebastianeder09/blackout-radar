@@ -94,7 +94,9 @@ DEFAULTS: dict = {
             "big_sources": 6,              # ab so vielen Medien gilt ein Ausfall ohne Zahlenangabe als groß
             "world_per_run": 2,            # so viele Welt-Suchen je Lauf (reihum)
             "max_areas_per_run": 2,        # so viele Nachweis-Suchen je Lauf
-            "feeds_per_run": 4,            # so viele Feeds je Lauf (reihum, jeder Feed etwa alle 25 Minuten)
+            # So viele Feeds je Lauf (reihum, jeder Feed etwa alle 25 Minuten). Bei Verdacht auf einen großen
+            # Ausfall in Europa kommen alle in jedem Lauf an die Reihe (news._all_feeds). 0 schaltet die Feeds ab.
+            "feeds_per_run": 4,
             "priority_queries": [
                 {"area": "AT-4", "hl": "de", "gl": "AT",
                  "q": "(Stromausfall OR Stromstörung OR \"ohne Strom\") "

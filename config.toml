@@ -61,6 +61,7 @@
 # quiet_hours = 6                 # so lange ohne neuen Bericht, dann gilt die Lage als beendet
 # followup_days = 7               # so lange gelten Berichte über Ursache und Folgen danach als Aufarbeitung
 # feeds_per_run = 4               # so viele Nachrichten-Feeds aus Übersee je Lauf, reihum (0: Feeds abschalten).
+#                                 # Bei Verdacht auf einen großen Ausfall in Europa werden alle abgefragt.
 #                                 # Die 20 Feeds stehen in blackout_radar/config.py unter "feeds".
 
 [sources.ioda]

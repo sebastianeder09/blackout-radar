@@ -54,6 +54,9 @@ class Headlines(unittest.TestCase):
             "Storm leaves half a million without power": 500_000,
             "Sturm: Eine halbe Million Menschen ohne Strom": 500_000,
             "Stromausfall verursacht eine Million Euro Schaden": None,
+            # So stand es am 27.11.2026 im Feed der Folha de S.Paulo
+            "Tempestade e ventania provocam inundações, atrasam voos e deixam quase 1 milhão sem luz nos EUA": 1_000_000,
+            "Apagón deja a 1 millón de usuarios sin luz": 2_000_000,
         }
         for title, expected in cases.items():
             with self.subTest(title=title):
@@ -746,6 +749,25 @@ class Stories(unittest.TestCase):
         signal = self.media_signals(self.collect(5))["EU"]
         self.assertEqual(signal.metrics["people"], 1_000_000)
         self.assertIn("großer Ausfall laut Schlagzeilen, Zahl unbekannt", signal.detail)
+
+    def test_every_feed_is_asked_while_europe_is_under_suspicion(self):
+        # Die Messquellen in Europa schweigen oder die Netzfrequenz schlägt aus: Das meldet der Lauf als "wide".
+        news.collect(self.cfg, self.cursor, at(0), {"active_areas": [], "wide": True})
+        self.assertEqual(sorted(self.asked), sorted(feed["domain"] for feed in self.cfg["feeds"]))
+        self.asked.clear()
+        self.collect(5)  # der Verdacht ist vorbei: wieder reihum
+        self.assertEqual(len(self.asked), 4)
+
+    def test_first_report_naming_europe_makes_every_feed_count(self):
+        self.wires["nytimes.com"] = [item("Massive blackout hits Europe", "nytimes.com", at(-5))]
+        self.collect(0)
+        self.assertEqual(len(self.asked), 4)  # der erste Bericht kam im gewöhnlichen Takt
+        self.assertNotIn("EU", self.media_signals(self.collect(5)))  # ein Medium allein löst nichts aus
+        self.assertEqual(len(self.asked), 4 + 20)  # aber alle Feeds werden gefragt
+        self.cfg["feeds_per_run"] = 0
+        self.asked.clear()
+        self.collect(10)
+        self.assertEqual(self.asked, [])  # abgeschaltet bleibt abgeschaltet
 
     def test_feeds_take_turns(self):
         for minute in range(0, 25, 5):

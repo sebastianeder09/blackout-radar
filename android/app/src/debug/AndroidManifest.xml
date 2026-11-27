@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Nur im Testbau: unverschlüsselter Zugriff auf den nachgestellten Server und Einrichten per adb. -->
+    <application android:usesCleartextTraffic="true">
+        <receiver
+            android:name=".DebugReceiver"
+            android:exported="true" />
+    </application>
+
+</manifest>

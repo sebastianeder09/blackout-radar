@@ -23,12 +23,16 @@ data class Posted(
     val body: String,
     val level: String,
     val handedOver: Boolean,
+    val public: Boolean = false,
 ) {
     /**
      * Unter dieser Kennung steht die Meldung in der Liste, wenn sie über den Notweg kam. Die Zeit gehört
      * dazu: Käme derselbe Schlüssel später noch einmal, wäre das eine neue Meldung, und die muss läuten.
+     *
+     * Beim öffentlichen Alarm ([public]) ist es die Kennung, die dieselbe Meldung auch über ntfy trägt:
+     * Zeit und Schlüssel stehen dort in den unterschriebenen Angaben (siehe [PublicAlarm.id]).
      */
-    val id: String get() = Fallback.ID_PREFIX + time + ":" + key.ifEmpty { title }
+    val id: String get() = if (public) PublicAlarm.id(time, key) else Fallback.ID_PREFIX + time + ":" + key.ifEmpty { title }
 }
 
 /**
@@ -71,6 +75,9 @@ object Fallback {
 
     private const val CHANNEL = "ntfy"
 
+    /** So heißt im Lagebericht der Kanal des öffentlichen Alarms. */
+    private const val CHANNEL_PUBLIC = "public"
+
     /** Der Radar kürzt Titel erst ab 240 Bytes. Kürzer als das hier ist ein gekürzter Titel nie. */
     private const val CLIPPED_MIN = 50
     private const val NO_TEXT = "Den Wortlaut führt der Lagebericht bei dieser Meldung nicht. Einzelheiten stehen im Lagebericht."
@@ -78,33 +85,41 @@ object Fallback {
     private val LATE = Regex("^Verspätet zugestellt, erstellt am (\\d{2}\\.\\d{2}\\. \\d{2}:\\d{2}) Uhr\\.")
     private val STAMP = DateTimeFormatter.ofPattern("dd.MM. HH:mm")
     private val SPACES = Regex("\\s+")
-    private val PRIORITY = mapOf("alarm" to 5, "warn" to 4, "info" to 3, "ok" to 3, "daily" to 2)
-    private val TAGS = mapOf("alarm" to "rotating_light", "warn" to "warning", "info" to "zap",
-        "ok" to "white_check_mark", "daily" to "bar_chart")
 
     // ------------------------------------------------------------------ Lesen
 
     /**
-     * Die Meldungen des Radars aus status.json, soweit sie für ntfy bestimmt waren.
+     * Die Meldungen des Radars aus status.json, soweit sie für dieses Handy bestimmt waren.
      * null, wenn der Lagebericht (noch) keine Meldungen führt.
+     *
+     * Beim eigenen Thema zählt, was der Radar an ntfy übergeben hat oder übergeben wollte. Beim öffentlichen
+     * Alarm ([public]) zählt, was für alle gedacht ist ("scope": "all"): Meldungen über den Betrieb des Radars
+     * gehen nur an den Betreiber. Führt der Lagebericht den öffentlichen Alarm gar nicht ("public"), stammt er
+     * von einem Radar, der ihn noch nicht kennt. Dann gibt es nichts abzugleichen.
      */
-    fun parse(statusJson: String?): List<Posted>? {
+    fun parse(statusJson: String?, public: Boolean = false): List<Posted>? {
         if (statusJson == null) return null
-        val array = try {
-            JSONObject(statusJson).optJSONArray("notices")
+        val status = try {
+            JSONObject(statusJson)
         } catch (e: JSONException) {
-            null
-        } ?: return null
+            return null
+        }
+        val array = status.optJSONArray("notices") ?: return null
+        val channel = if (public) CHANNEL_PUBLIC else CHANNEL
+        // Sendet der Radar gerade gar nicht an den öffentlichen Alarm (Schlüssel fehlt oder passt nicht), nennt er
+        // den Kanal bei keiner Meldung. Dann zählt jede Meldung für alle, und die App zeigt sie selbst an.
+        val sending = !public || (status.optJSONObject(CHANNEL_PUBLIC) ?: return null).optBoolean("enabled", false)
         val result = ArrayList<Posted>()
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
             val title = text(item, "title")
             val time = seconds(text(item, "t"))
             if (title.isEmpty() || time <= 0L) continue
-            val handedOver = CHANNEL in strings(item.optJSONArray("delivered"))
-            // Nennt der Radar ntfy bei einer Meldung gar nicht, war sie nicht für den Push gedacht
-            // (im Radar lässt sich etwa die tägliche Übersicht für ntfy abschalten).
-            if (!handedOver && CHANNEL !in strings(item.optJSONArray("pending"))) continue
+            if (public && text(item, "scope") != "all") continue
+            val handedOver = channel in strings(item.optJSONArray("delivered"))
+            // Nennt der Radar den Kanal bei einer Meldung gar nicht, war sie nicht für den Push gedacht
+            // (im Radar lässt sich etwa die tägliche Übersicht für einen Kanal abschalten).
+            if (sending && !handedOver && channel !in strings(item.optJSONArray("pending"))) continue
             result.add(Posted(
                 key = text(item, "key"),
                 time = time,
@@ -112,6 +127,7 @@ object Fallback {
                 body = text(item, "body"),
                 level = text(item, "level").ifEmpty { "info" },
                 handedOver = handedOver,
+                public = public,
             ))
         }
         return result
@@ -211,6 +227,16 @@ object Fallback {
     }
 
     /**
+     * Dasselbe für den öffentlichen Alarm. Dort trägt eine Meldung auf jedem Weg dieselbe Kennung, zu
+     * vergleichen ist also nichts: Es fehlt, was nicht unter seiner Kennung in der Liste steht.
+     */
+    fun missingPublic(posted: List<Posted>, log: List<Notice>, setupSeconds: Long, nowSeconds: Long): List<Posted> {
+        val known = log.mapTo(HashSet()) { it.id }
+        return posted.filter { it.time >= setupSeconds && nowSeconds - it.time <= MAX_AGE_S && it.id !in known }
+            .sortedBy { it.time }
+    }
+
+    /**
      * Der Eintrag, den die App über den Notweg angelegt hat und dessen Zustellung über ntfy jetzt mit
      * [arrived] doch noch kommt. Gibt es mehrere, zählt der älteste: Zustellungen kommen der Reihe nach.
      */
@@ -223,20 +249,29 @@ object Fallback {
         time = posted.time,
         title = posted.title,
         message = posted.body.ifBlank { NO_TEXT },
-        priority = PRIORITY[posted.level] ?: 3,
-        tags = listOfNotNull(TAGS[posted.level]),
+        priority = Levels.priority(posted.level),
+        tags = Levels.tags(posted.level),
         click = click,
         via = via,
     )
 
-    /** Der Grund in Worten, für die Benachrichtigung und die Liste der Meldungen. */
-    fun reason(via: String): String = when (via) {
-        "" -> ""
-        VIA_RADAR -> "Über den Notweg aus dem Lagebericht. Der Radar konnte diese Meldung nicht an ntfy übergeben."
-        VIA_NET -> "Über den Notweg aus dem Lagebericht. ntfy war von diesem Handy aus nicht erreichbar."
-        VIA_TOPIC -> "Über den Notweg aus dem Lagebericht. ntfy hat geantwortet, unter dem Thema dieses Handys lag die " +
-            "Meldung dort aber nicht. Kommt das öfter vor, stimmt das Thema nicht mit dem des Radars überein."
-        else -> "Über den Notweg aus dem Lagebericht."
+    /**
+     * Der Grund in Worten, für die Benachrichtigung und die Liste der Meldungen. Beim öffentlichen Alarm
+     * ([public]) kann das Thema am Handy nicht falsch sein, dort lautet der dritte Grund anders. Die Fassung
+     * aus dem Play Store ([play]) nennt den Dienst, über den die Meldungen kommen, nicht beim Namen.
+     */
+    fun reason(via: String, public: Boolean = false, play: Boolean = BuildConfig.PLAY): String {
+        val push = if (play) "Der Push-Dienst" else "ntfy"
+        return when (via) {
+            "" -> ""
+            VIA_RADAR -> "Über den Notweg aus dem Lagebericht. Der Radar konnte diese Meldung nicht an " +
+                (if (play) "den Push-Dienst" else "ntfy") + " übergeben."
+            VIA_NET -> "Über den Notweg aus dem Lagebericht. $push war von diesem Handy aus nicht erreichbar."
+            VIA_TOPIC -> if (public) "Über den Notweg aus dem Lagebericht. $push hat geantwortet, die Meldung lag dort aber nicht vor."
+                else "Über den Notweg aus dem Lagebericht. $push hat geantwortet, unter dem Thema dieses Handys lag die " +
+                    "Meldung dort aber nicht. Kommt das öfter vor, stimmt das Thema nicht mit dem des Radars überein."
+            else -> "Über den Notweg aus dem Lagebericht."
+        }
     }
 
     // ------------------------------------------------------------------ Ablauf
@@ -259,21 +294,24 @@ object Fallback {
         val store = Store.get(context)
         val target = store.target ?: return 0
         val setup = store.sinceTime
+        val public = target == PublicAlarm.target(store)
         val json = StatusRepo.cachedJson(store)
-        val posted = parse(json)
+        val posted = parse(json, public)
         store.fallbackReady = posted != null
         if (posted == null) return 0
         val zone = zone(json)
         val now = System.currentTimeMillis() / 1000L
+        fun missingNow(): List<Posted> =
+            if (public) missingPublic(posted, store.log.all(), setup, now) else missing(posted, store.log.all(), setup, now, zone)
         // Der Radar hat übergeben, hier fehlt es: zuerst bei ntfy nachfragen. Kommt die Meldung so, läutet sie
         // wie gewohnt. Antwortet ntfy und die Meldung fehlt weiter, liegt sie dort nicht unter diesem Thema.
-        val open = missing(posted, store.log.all(), setup, now, zone)
+        val open = missingNow()
         val reachable = open.any { it.handedOver } && Sync.catchUp(context, timeoutMs) >= 0
         val shown = ArrayList<Notice>()
         synchronized(Sync.lock) {
             // Wurde inzwischen neu eingerichtet, gehört der Abgleich nicht mehr hierher.
             if (store.target != target || store.sinceTime != setup) return 0
-            for (item in missing(posted, store.log.all(), setup, now, zone)) {
+            for (item in missingNow()) {
                 // Nur was schon vor der Nachfrage fehlte: Für alles andere wurde ntfy noch nicht gefragt.
                 if (item !in open) continue
                 val via = if (!item.handedOver) VIA_RADAR else if (reachable) VIA_TOPIC else VIA_NET

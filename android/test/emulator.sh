@@ -4,16 +4,26 @@
 # Fertige App (release) gegen das echte ntfy.sh, auf einem Zufallsthema nur für diesen Lauf:
 # Einrichten per Link, Lagebericht des echten Radars, Zustellung eines Alarms, Funkloch,
 # Ruhezustand (Doze), abgestürzter Dienst und Neustart des Handys. Testbau (debug) gegen einen
-# nachgestellten Server (android/test/fake_ntfy.py auf Port 8765): Einrichten aus der kopierten
-# Nachricht eines anderen Handys, Anzeige bei einem Blackout, der Notweg über den Lagebericht
+# nachgestellten Server (android/test/fake_ntfy.py auf Port 8765): Willkommensseite, Einrichten aus der
+# kopierten Nachricht eines anderen Handys, Anzeige bei einem Blackout, der Notweg über den Lagebericht
 # (Radar wird eine Meldung nicht los, falsches Thema, ntfy fällt aus) und Einrichten ohne Netz.
-# Zum Schluss geben beide die App als Datei samt Thema weiter (thema_datei.py rechnet am Rechner
+# Dazu der öffentliche Alarm: Der Testbau nimmt nur an, was der nachgestellte Radar unterschrieben hat,
+# und verwirft, was ein Fremder in dasselbe Thema schreibt. Impressum, Datenschutzerklärung und die Seite
+# "Über uns" öffnen sich, die Zurück-Geste führt eine Ebene zurück und zuletzt aus der App.
+# Dann geben beide die App als Datei samt Thema weiter (thema_datei.py rechnet am Rechner
 # nach, was in der Datei stehen muss), und beide werden aus dieser Datei frisch installiert:
 # Beim ersten Öffnen müssen sie verbunden sein, ohne dass jemand etwas eingibt.
+# Zum Schluss schaltet die fertige App den öffentlichen Alarm am echten Thema ein (sie liest dort nur),
+# und der Testbau der Fassung für Google Play (eigener Paketname) zeigt, dass er läuft und alarmiert. Diese
+# Fassung führt unten nur "Lage" und "Meldungen", die Einstellungen liegen hinter dem Zahnrad, und fremde Dienste
+# (GitHub, ntfy) nennt sie nur in der Datenschutzerklärung. Ihr Name muss in der Kopfzeile auch auf einem schmalen
+# Handy (360 dp) mit großer Schrift ganz zu lesen sein: Dafür stellt der Lauf Breite und Schriftgröße um.
 #
 # Was die App anzeigt, liest seite.py aus der Seite selbst. Auf jeder Seite, die der Lauf zeigt, sucht
 # fremdtext.js nach Text, der dort nie stehen soll (ein nacktes "null"). Ob das Bild am Handy einer Änderung
-# auch folgt, zeigt der Vergleich zweier Bildschirmfotos (Vorschau.java). Am Ende steht die Frage,
+# auch folgt, zeigt der Vergleich zweier Bildschirmfotos (Vorschau.java). Dasselbe Werkzeug sagt, ob ein
+# Bildschirmfoto überhaupt etwas zeigt: Nach jedem ersten Start wartet der Lauf darauf, und am Schluss darf
+# kein Bild eine leere Seite zeigen. Am Ende steht die Frage,
 # ob die App im Lauf abgestürzt ist, mit einem absichtlichen Absturz des Testbaus als Gegenprobe.
 # Ergebnisse (Bilder, Ablauf, Protokolle) landen in $OUT.
 set -uo pipefail
@@ -23,6 +33,8 @@ OUT="${OUT:-$PWD/ergebnis}"
 APK_DIR="${APK_DIR:-$PWD/apk}"
 PKG=io.github.sebastianeder09.blackoutradar
 DBG=$PKG.debug
+PLAY=at.ase_it.blackoutradar.debug  # Testbau der Fassung für Google Play: gleiches Programm, eigener Paketname
+ALARM=http://10.0.2.2:8765/alarm-test  # Thema des öffentlichen Alarms am nachgestellten Server (fixtures.py)
 NTFY=https://ntfy.sh
 TOPIC="br-ci-$(openssl rand -hex 8)"
 mkdir -p "$OUT"
@@ -44,6 +56,32 @@ quiet_system() {  # Hinweise von Android, dass eine App hängt oder abgestürzt 
 
 snap() { adb exec-out screencap -p > "$OUT/$1.png" && log "Bild $1"; }  # Name: Bild, so wie es gerade ist
 shot() { sleep "${2:-1}"; quiet_system; snap "$1"; }  # Name [Wartezeit]: Bild der App, ohne fremde Hinweise darüber
+
+# Eine Seite kann vollständig in der App stehen, während der Bildschirm noch eine leere Fläche zeigt: Nach dem
+# ersten Start einer frisch installierten App zeichnet der Emulator sie manchmal erst Sekunden später. Was die Seite
+# enthält, liest der Lauf aus der Seite selbst, das merkt er also nicht. Deshalb wartet er nach jedem ersten Start,
+# bis der Bildschirm etwas zeigt, und hält fest, wie lange das gedauert hat. Bleibt der Bildschirm leer, ist das ein
+# Fehler: Wer die App zum ersten Mal öffnet, sähe nichts. Das leere Bild bleibt dann bei den Ergebnissen liegen.
+painted() {  # Stelle [Sekunden]: wartet, bis der Bildschirm Inhalt zeigt
+  local start verdict code
+  start=$(date +%s)
+  while :; do
+    adb exec-out screencap -p > "$OUT/gezeichnet.png"
+    verdict=$(java -Djava.awt.headless=true "$HERE/Vorschau.java" inhalt "$OUT/gezeichnet.png" 2> /dev/null)
+    code=$?
+    if [ "$code" -eq 0 ]; then
+      rm -f "$OUT/gezeichnet.png"
+      log "Gezeichnet, $1: nach $(($(date +%s) - start)) s (${verdict#*: })"
+      return 0
+    fi
+    if [ $(($(date +%s) - start)) -ge "${2:-30}" ]; then
+      mv "$OUT/gezeichnet.png" "$OUT/99-leer-geblieben.png"
+      log "Gezeichnet, $1: nach ${2:-30} s noch nicht (${verdict:-Bild nicht auswertbar})"
+      return 1
+    fi
+    sleep 1
+  done
+}
 
 publish() {  # Titel Priorität Schlagworte Text
   curl -sS --retry 3 -H "Title: $1" -H "Priority: $2" -H "Tags: $3" -d "$4" "$NTFY/$TOPIC" > /dev/null \
@@ -77,6 +115,7 @@ page_has() {  # Paket Text: steht der Text gerade in der Seite der App?
   done
   if [ -s "$OUT/seite-fehler.txt" ]; then
     log "Seite von $1 nicht lesbar: $(tr '\n' ' ' < "$OUT/seite-fehler.txt")"
+    log "Android zuletzt zu $1: $(system_says "$1" | tail -6 | tr '\n' '|')"
   else
     log "Seite von $1 zeigt nicht \"$2\", sondern: $(head -c 300 <<< "$text" | tr '\n' '|')"
   fi
@@ -96,9 +135,13 @@ wait_page() {  # Paket Text Sekunden -> gibt die Wartezeit in Sekunden aus, soba
   return 1
 }
 
-debug_app() {  # Angaben für den DebugReceiver des Testbaus -> Antwort der App (data="…"), siehe DebugReceiver
-  adb shell am broadcast -n "$DBG/$PKG.DebugReceiver" "$@" 2> /dev/null | tr -d '\r' | sed -n 's/.*data="\(.*\)".*/\1/p'
+debug_in() {  # Paket, dann Angaben für den DebugReceiver dieses Testbaus -> Antwort der App (data="…"), siehe DebugReceiver
+  local package=$1
+  shift
+  adb shell am broadcast -n "$package/$PKG.DebugReceiver" "$@" 2> /dev/null | tr -d '\r' | sed -n 's/.*data="\(.*\)".*/\1/p'
 }
+
+debug_app() { debug_in "$DBG" "$@"; }  # dasselbe für den Testbau der Fassung von GitHub
 
 setup_debug() {  # richtet den Testbau am nachgestellten Server ein -> Antwort der App
   debug_app --es ziel http://10.0.2.2:8765/testthema --es status http://10.0.2.2:8765
@@ -118,6 +161,22 @@ cards() {  # Titel [Text]: Zahl der Karten mit diesem Titel (und diesem Text) in
   page "$DBG" "[...document.querySelectorAll('.msg')].filter(c => c.querySelector('h4').textContent.includes('$1') && c.textContent.includes('${2:-}')).length"
 }
 
+tap() {  # Paket Ausdruck: drückt in der Seite den Knopf, den der Ausdruck liefert -> "ja", oder "nein", wenn es ihn nicht gibt
+  page "$1" "(b => b ? (b.click(), 'ja') : 'nein')($2)"
+}
+
+button() { echo "[...document.querySelectorAll('$1')].find(b => b.textContent.trim() === '$2')"; }  # Auswahl Beschriftung -> Ausdruck für tap
+
+front() {  # Paket: steht die App gerade vorn?
+  adb shell dumpsys activity activities 2> /dev/null | tr -d '\r' | grep -E 'ResumedActivity' | grep -qF " $1/"
+}
+
+clip_note() {  # Paket: Was Android über das Lesen der Zwischenablage durch diese App vermerkt hat
+  adb shell cmd appops get "$1" READ_CLIPBOARD 2> /dev/null | tr -d '\r' | tr '\n' ' '
+}
+
+clip_read() { clip_note "$1" | grep -qE '(^|[; ])time='; }  # Paket: hat die App die Zwischenablage je gelesen?
+
 notifications() {  # Titel: Zahl der Benachrichtigungen mit diesem Titel
   adb shell dumpsys notification --noredact 2> /dev/null | grep -c "android.title=.*$1"
 }
@@ -133,11 +192,41 @@ for block in sys.stdin.read().split("NotificationRecord(")[1:]:
 ' "$1"
 }
 
+notified_by() {  # Paket Titel: hat diese App eine Benachrichtigung mit diesem Titel gezeigt?
+  adb shell dumpsys notification --noredact 2> /dev/null | python3 -c '
+import sys
+for block in sys.stdin.read().split("NotificationRecord(")[1:]:
+    if "pkg=" + sys.argv[1] + " " in block and sys.argv[2] in block:
+        sys.exit(0)
+sys.exit(1)
+' "$1" "$2"
+}
+
 layout() {  # Paket Name: Kopfzeile oben, Leiste unten, nichts ragt seitlich hinaus (aufbau.js)
   local verdict
   verdict=$(page "$1" "$(cat "$HERE/aufbau.js")")
   log "Aufbau $2: ${verdict:-nicht lesbar}"
   [[ "$verdict" == ok* ]]
+}
+
+title_whole() {  # Paket Name: steht der Name der App in der Kopfzeile ganz da, nicht mit "…" abgeschnitten?
+  local verdict
+  verdict=$(page "$1" "(h => !h ? 'FEHLER: Name fehlt' : (h.scrollWidth > h.clientWidth + 1 ? 'FEHLER: abgeschnitten' : 'ok') + ' (Name ' + h.scrollWidth + ' breit, Platz ' + h.clientWidth + ', Seite ' + innerWidth + ', Schrift mal ' + (h.closest('header').style.getPropertyValue('--fit') || '1') + ', Verbindung als ' + ((l => l && l.offsetParent ? 'Wort' : 'Punkt')(document.querySelector('header.top .pill .label'))) + ')')(document.querySelector('header.top .brand h1'))")
+  log "Name in der Kopfzeile, $2: ${verdict:-nicht lesbar}"
+  [[ "$verdict" == ok* ]]
+}
+
+# Die Fassung für Google Play nennt fremde Dienste (GitHub, ntfy) nur in der Datenschutzerklärung. Geprüft wird jede
+# ihrer Seiten, die der Lauf zeigt, samt zugeklappten Abschnitten. Das Ergebnis steht am Schluss in einer Zeile.
+NAMED_PAGES=0
+NAMED=""
+unnamed() {  # Paket Name der Seite
+  local verdict
+  verdict=$(page "$1" "(t => (t.match(/github|ntfy/gi) || []).filter((x, i, a) => a.indexOf(x) === i).join(', ') || 'keine')(document.getElementById('app').textContent)")
+  NAMED_PAGES=$((NAMED_PAGES + 1))
+  [ "$verdict" = keine ] && return 0
+  log "Fremder Dienst genannt, $2: ${verdict:-Seite nicht lesbar}"
+  NAMED="$NAMED \"$2\""
 }
 
 # Steht irgendwo in der Seite ein nacktes "null" oder "undefined" (fremdtext.js)? So etwas bleibt, wenn der Aufbau der
@@ -171,8 +260,8 @@ exits() {  # Paket: eine Zeile je Prozessende, z. B. "reason=2 (SIGNALED) subrea
   adb shell dumpsys activity exit-info "$1" 2> /dev/null | tr -d '\r' | grep -oE '(^|[[:space:]])reason=[0-9].*' | sed 's/^[[:space:]]*//'
 }
 
-note_exits() {  # Datei: Prozessenden der fertigen App und des Testbaus bis jetzt festhalten
-  { exits "$PKG" | sed 's/^/fertige App: /'; exits "$DBG" | sed 's/^/Testbau: /'; } > "$OUT/$1"
+note_exits() {  # Datei: Prozessenden der fertigen App und der beiden Testbauten bis jetzt festhalten
+  { exits "$PKG" | sed 's/^/fertige App: /'; exits "$DBG" | sed 's/^/Testbau: /'; exits "$PLAY" | sed 's/^/Testbau Play: /'; } > "$OUT/$1"
 }
 
 # Absturz (Java), Absturz (nativ), Hänger, Start misslungen. Am Zeilenanfang oder nach dem Namen der App,
@@ -187,7 +276,43 @@ reports() {  # Paket Datei: Fehlerberichte von Android zu Abstürzen und Hänger
   grep -F -A 25 "Process: $1" "$OUT/$2"
 }
 
-service_running() { adb shell dumpsys activity services "$1/.ListenerService" 2> /dev/null | grep -q "ServiceRecord"; }
+service_running() { adb shell dumpsys activity services "$1/$PKG.ListenerService" 2> /dev/null | grep -q "ServiceRecord"; }  # Paket: läuft der Dienst dieser App?
+
+wait_service() {  # Paket Sekunden -> Wartezeit in Sekunden, sobald der Dienst dieser App läuft
+  local start
+  start=$(date +%s)
+  while [ $(($(date +%s) - start)) -lt "$2" ]; do
+    if service_running "$1"; then
+      echo $(($(date +%s) - start))
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_restart() {  # Paket Bisheriger-Prozess Sekunden -> Wartezeit in Sekunden, sobald die App in einem neuen Prozess ihren Dienst hält
+  local start pid
+  start=$(date +%s)
+  while [ $(($(date +%s) - start)) -lt "$3" ]; do
+    pid=$(adb shell pidof "$1" 2> /dev/null | tr -d '\r')
+    if [ -n "$pid" ] && [ "$pid" != "$2" ] && service_running "$1"; then
+      echo $(($(date +%s) - start))
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+system_says() {  # Paket [Zeitpunkt am Handy]: was Android über Starten und Beenden dieser App ins Systemprotokoll schrieb
+  local since="-t 4000"
+  [ -n "${2:-}" ] && since="-T '$2'"
+  adb shell "logcat -d -v time $since" 2> /dev/null | tr -d '\r' | grep -F -- "$1" \
+    | { if [ "$1" = "$PKG" ]; then grep -vF -- "$DBG"; else cat; fi; } \
+    | grep -E 'Force stopping|Killing [0-9]+:|Start proc|has died|START u0|Displayed ' \
+    | sed -E -e 's/^[0-9-]+ +([0-9:.]+) +[A-Z]\/[^(]*\( *[0-9]+\): /\1 /' -e "s/${PKG//./\\.}/…/g" | cut -c1-200
+}
 
 chooser() { adb shell dumpsys activity activities 2> /dev/null | grep -q "ChooserActivity"; }  # zeigt Android gerade seine Auswahl zum Weitergeben?
 
@@ -223,23 +348,39 @@ for p in $PKG $DBG; do grant_and_exempt "$p"; done
 
 log "Bildschirm: $(adb shell wm size | tr -d '\r' | tr '\n' ' ')$(adb shell wm density | tr -d '\r' | tr '\n' ' ')"
 
-# ------------------------------------------------------------ Testbau: Blackout
+# ------------------------------------------------------------ Testbau: erste Seite
 adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
-page_has "$DBG" "Alarme auf dieses Handy holen" && ok "Testbau: Einrichten wird angezeigt" || bad "Testbau: Einrichten fehlt"
-clean "$DBG" "Testbau: Einrichten"
-shot 00-einrichten
-# Ein weiteres Handy einrichten: Die weitergegebene Nachricht liegt in der Zwischenablage, so als hätte sie jemand
-# im Messenger kopiert. Wechselt der Mensch danach in die App, steht das Thema schon im Feld. Verbinden tippt er
-# selbst. Der Lagebericht kommt dabei schon vom nachgestellten Server, nicht von GitHub.
+page_has "$DBG" "Alarm bei großem Stromausfall" && ok "Testbau: Willkommensseite wird angezeigt" || bad "Testbau: Willkommensseite fehlt"
+painted "Testbau, erster Start" && ok "Testbau: Die Seite ist nach dem ersten Start am Bildschirm zu sehen" \
+  || bad "Testbau: Der Bildschirm bleibt nach dem ersten Start leer"
+clean "$DBG" "Testbau: Willkommen"
+shot 00-willkommen
+# Ein weiteres Handy am eigenen Radar einrichten: Die weitergegebene Nachricht liegt in der Zwischenablage, so als
+# hätte sie jemand im Messenger kopiert. Auf der Willkommensseite sieht die App nicht hinein: Wer nur den
+# öffentlichen Alarm einschaltet, dessen Zwischenablage geht sie nichts an. Android führt Buch darüber, ob eine
+# App die Zwischenablage gelesen hat. Der Lagebericht kommt dabei schon vom nachgestellten Server, nicht von GitHub.
 debug_app --es status http://10.0.2.2:8765 > /dev/null
 adb shell input keyevent KEYCODE_HOME
 sleep 2
 log "Zwischenablage: $(debug_app --es zwischenablage http://10.0.2.2:8765/testthema)"
 adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
+sleep 4
+where=$(page "$DBG" "document.getElementById('setup').getAttribute('data-page')")
+if [ "$where" = welcome ] && ! clip_read "$DBG"; then
+  ok "Testbau: auf der Willkommensseite bleibt die Zwischenablage ungelesen"
+else
+  bad "Testbau: Zwischenablage schon auf der Willkommensseite gelesen (Seite \"$where\", Android: $(clip_note "$DBG"))"
+fi
+# Erst die Seite für den eigenen Radar sieht hinein und trägt das Thema ins Feld ein. Verbinden tippt der Mensch selbst.
+[ "$(tap "$DBG" "document.getElementById('own')")" = ja ] || bad "Testbau: Knopf „Eigenen Radar verbinden“ fehlt"
+page_has "$DBG" "Alarme auf dieses Handy holen" && ok "Testbau: Seite zum eigenen Radar wird angezeigt" || bad "Testbau: Seite zum eigenen Radar fehlt"
 field=""
 wait_page "$DBG" "Aus der kopierten Nachricht übernommen" 20 > /dev/null && field=$(page "$DBG" "document.getElementById('topic').value")
 [ "$field" = "http://10.0.2.2:8765/testthema" ] && ok "Testbau: Thema aus der kopierten Nachricht steht von selbst im Feld" \
   || bad "Testbau: Thema aus der kopierten Nachricht nicht übernommen (im Feld: \"$field\")"
+clip_read "$DBG" && ok "Gegenprobe: Android vermerkt, dass die App die Zwischenablage jetzt gelesen hat" \
+  || bad "Gegenprobe: Android vermerkt das Lesen der Zwischenablage nicht, die Prüfung davor ist nichts wert ($(clip_note "$DBG"))"
+clean "$DBG" "Testbau: Einrichten"
 shot 00b-einrichten-kopiert 7  # erst wenn der Hinweis von Android zum Kopieren wieder weg ist
 page "$DBG" "document.getElementById('connect').click()" > /dev/null
 connected=nein
@@ -266,6 +407,7 @@ page_has "$DBG" "Laufender Stromausfall" && ok "Testbau: Lagebericht mit laufend
 clean "$DBG" "Testbau: Lage"
 shot 10-blackout-lage
 layout "$DBG" "Testbau" && ok "Testbau: Kopfzeile und Leiste sitzen richtig" || bad "Testbau: Aufbau der Seite stimmt nicht"
+title_whole "$DBG" "Testbau" && ok "Testbau: Name der App steht in der Kopfzeile ganz da" || bad "Testbau: Name der App ist in der Kopfzeile abgeschnitten"
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab meldungen > /dev/null
 page_has "$DBG" "Die App behält die letzten 300 Meldungen" && ok "Testbau: Liste der Meldungen angezeigt" || bad "Testbau: Liste der Meldungen fehlt"
 clean "$DBG" "Testbau: Meldungen"
@@ -288,7 +430,7 @@ n=$(reconcile)
 
 # 1. Der Radar wird eine Meldung bei ntfy nicht los. Die App holt sie aus dem Lagebericht, so laut wie über ntfy.
 radar schalter '{"radar_erreicht_ntfy": false}' > /dev/null
-log "Radar: $(radar radar/meldung '{"title": "Notweg Alarm", "body": "Probe aus dem Emulator-Test: Diese Meldung wurde der Radar bei ntfy nicht los.", "level": "alarm"}')"
+log "Radar: $(radar radar/meldung '{"title": "Notweg Alarm", "body": "Probe aus dem Emulator-Test: Diese Meldung wurde der Radar beim Push-Dienst nicht los.", "level": "alarm"}')"
 n=$(reconcile)
 [ "$n" = 1 ] && ok "Notweg: Meldung, die der Radar nicht loswurde, aus dem Lagebericht geholt" || bad "Notweg: Abgleich ergab $n statt 1"
 if wait_notification "Notweg Alarm" 20 > /dev/null; then ok "Notweg: Alarm als Benachrichtigung"; else bad "Notweg: Alarm nicht als Benachrichtigung"; fi
@@ -330,7 +472,7 @@ n=$(reconcile)
 # 5. ntfy fällt aus, der Lagebericht bleibt erreichbar. Niemand stößt den Abgleich an: Die App muss von selbst
 #    im Lagebericht nachsehen. Der letzte Abgleich gilt dafür als lange her, sonst wartete sie den Mindestabstand ab.
 radar schalter '{"handy_erreicht_ntfy": false}' > /dev/null
-log "Radar: $(radar radar/meldung '{"title": "Notweg von selbst", "body": "Probe aus dem Emulator-Test: ntfy war für das Handy nicht erreichbar.", "level": "alarm"}')"
+log "Radar: $(radar radar/meldung '{"title": "Notweg von selbst", "body": "Probe aus dem Emulator-Test: Der Push-Dienst war für das Handy nicht erreichbar.", "level": "alarm"}')"
 debug_app --ez ausgeruht true > /dev/null
 if t=$(wait_notification "Notweg von selbst" 240); then ok "Notweg: ntfy ausgefallen, App alarmiert nach $t s von selbst"; else bad "Notweg: ntfy ausgefallen, App hat nicht von selbst alarmiert"; fi
 page_has "$DBG" "ntfy war von diesem Handy aus nicht erreichbar" && ok "Notweg: Liste nennt den Ausfall von ntfy als Grund" || bad "Notweg: Grund für den Ausfall von ntfy fehlt"
@@ -362,11 +504,143 @@ sleep 2
   && ok "Testbau: dunkle Darstellung folgt dem Handy" || bad "Testbau: dunkle Darstellung nicht übernommen"
 shot 13-blackout-lage-dunkel
 adb shell cmd uimode night no > /dev/null
+
+# ------------------------------------------------------------ Testbau: öffentlicher Alarm
+# Für alle ohne eigenen Radar: ein festes Thema, das jeder lesen und beschreiben kann. Die App nimmt dort nur an,
+# was der Radar unterschrieben hat. Der Testbau verbindet sich dafür mit dem Thema "alarm-test" des nachgestellten
+# Servers, dessen Radar mit dem Testschlüssel unterschreibt. Das echte Thema bei ntfy.sh bleibt unberührt.
+log "Öffentlicher Alarm: $(debug_app --es oeffentlich "$ALARM")"
+# Vom eigenen Thema dorthin, so wie es ein Mensch täte: "Thema ändern", zurück zur Willkommensseite, ein Knopf.
+adb shell am start -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
+page_has "$DBG" "Thema ändern" > /dev/null
+tap "$DBG" "$(button .btn.danger 'Thema ändern')" > /dev/null
+page_has "$DBG" "Die App vergisst das bisherige Thema" && ok "Thema ändern: die App fragt vorher nach" || bad "Thema ändern: Rückfrage fehlt"
+tap "$DBG" "document.querySelector('#modal .btn.danger')" > /dev/null
+page_has "$DBG" "Alarme auf dieses Handy holen" && ok "Thema ändern: danach steht die Seite zum eigenen Radar offen" \
+  || bad "Thema ändern: Seite zum eigenen Radar fehlt"
+# Die Zurück-Geste von Android: von dieser Seite zur Willkommensseite, von dort aus der App hinaus.
+adb shell input keyevent KEYCODE_BACK
+page_has "$DBG" "Alarm bei großem Stromausfall" && front "$DBG" && ok "Zurück führt von der Seite zum eigenen Radar zur Willkommensseite" \
+  || bad "Zurück führt von der Seite zum eigenen Radar nicht zur Willkommensseite"
+adb shell input keyevent KEYCODE_BACK
+sleep 3
+front "$DBG" && bad "Zurück auf der Willkommensseite verlässt die App nicht" || ok "Zurück auf der Willkommensseite verlässt die App"
+adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
+page_has "$DBG" "Alarm bei großem Stromausfall" || bad "Testbau: Willkommensseite fehlt nach der Rückkehr in die App"
+expected=$(curl -sS "http://127.0.0.1:8765/alarm-test/json?poll=1&since=all" | grep -c .)  # bis hierher nur Meldungen des Radars
+[ "$(tap "$DBG" "document.getElementById('enable')")" = ja ] || bad "Öffentlicher Alarm: Knopf „Alarm einschalten“ fehlt"
+if t=$(wait_page "$DBG" "Alarm ist eingeschaltet" 40); then
+  ok "Öffentlicher Alarm: ein Tipp genügt, nach $t s eingeschaltet"
+else
+  bad "Öffentlicher Alarm: ließ sich nicht einschalten"
+fi
+clean "$DBG" "Testbau: öffentlicher Alarm eingeschaltet"
+shot 21-oeffentlich-eingeschaltet
+tap "$DBG" "document.querySelector('.result .btn.primary')" > /dev/null  # Knopf "Weiter"
+adb shell am start -n "$DBG/$PKG.MainActivity" --es tab meldungen > /dev/null
+page_has "$DBG" "Die App behält die letzten 300 Meldungen" > /dev/null
+# Was der Radar bis hierher an das öffentliche Thema geschickt hat, liegt dort noch. Jede dieser Meldungen muss die
+# Prüfung der Unterschrift bestehen, hier zum ersten Mal mit den Bordmitteln von Android statt am Rechner.
+shown=$(page "$DBG" "document.querySelectorAll('.msg').length")
+[ "$expected" -gt 0 ] && [ "$shown" = "$expected" ] && ok "Öffentlicher Alarm: alle $expected unterschriebenen Meldungen des Radars angenommen" \
+  || bad "Öffentlicher Alarm: $shown von $expected unterschriebenen Meldungen angenommen"
+[ "$(page "$DBG" "document.body.innerText.includes('br1.')")" = false ] && ok "Öffentlicher Alarm: die Zeile mit der Unterschrift steht nicht im Text" \
+  || bad "Öffentlicher Alarm: die Zeile mit der Unterschrift steht im Text der Meldungen"
+clean "$DBG" "Testbau: Meldungen beim öffentlichen Alarm"
+
+# Ein unterschriebener Alarm kommt an und läutet wie über das eigene Thema.
+log "Radar: $(radar radar/meldung '{"title": "Alarm an alle", "body": "Probe aus dem Emulator-Test: unterschriebener Alarm an das öffentliche Thema.", "level": "alarm"}')"
+if t=$(wait_notification "Alarm an alle" 40); then ok "Öffentlicher Alarm: unterschriebener Alarm nach $t s als Benachrichtigung"; else bad "Öffentlicher Alarm: unterschriebener Alarm kam nicht an"; fi
+channel=$(channel_of "Alarm an alle")
+[ "$channel" = alarm_laut ] && ok "Öffentlicher Alarm: läuft über den lauten Alarm-Kanal" || bad "Öffentlicher Alarm: läuft über den Kanal \"$channel\" statt über den lauten Alarm-Kanal"
+shot 22-oeffentlich-meldung 7  # erst wenn der Hinweis von Android am oberen Rand wieder weg ist
+
+# Ein Fremder schreibt in dasselbe Thema: ohne Unterschrift, mit der Unterschrift des echten Alarms unter anderem
+# Text und unter anderem Titel, und er spielt den echten Alarm unverändert noch einmal ein. Nichts davon darf läuten
+# oder in der Liste stehen. Dass die App alle vier gelesen hat, zeigt die echte Meldung, die danach ankommt.
+for kind in ohne text titel wiederholung; do
+  log "Fremder ($kind): $(radar fremder "{\"art\": \"$kind\"}" | head -c 150)"
+done
+log "Radar: $(radar radar/meldung '{"title": "Echt nach falsch", "body": "Probe aus dem Emulator-Test: echte Meldung nach den falschen.", "level": "warn"}')"
+if t=$(wait_notification "Echt nach falsch" 40); then ok "Öffentlicher Alarm: echte Meldung nach den falschen kommt nach $t s an"; else bad "Öffentlicher Alarm: echte Meldung nach den falschen kam nicht an"; fi
+page_has "$DBG" "Echt nach falsch" > /dev/null
+[ "$(notifications "Falscher Alarm")" = 0 ] && [ "$(cards "Falscher Alarm")" = 0 ] \
+  && [ "$(page "$DBG" "document.body.innerText.includes('fremder Text')")" = false ] \
+  && ok "Öffentlicher Alarm: Meldungen ohne gültige Unterschrift läuten nicht und stehen nicht in der Liste" \
+  || bad "Öffentlicher Alarm: eine Meldung ohne gültige Unterschrift wurde angenommen ($(notifications "Falscher Alarm") Benachrichtigungen, $(cards "Falscher Alarm") Karten)"
+[ "$(notifications "Alarm an alle")" = 1 ] && [ "$(cards "Alarm an alle")" = 1 ] \
+  && ok "Öffentlicher Alarm: ein noch einmal eingespielter echter Alarm läutet kein zweites Mal" \
+  || bad "Öffentlicher Alarm: $(notifications "Alarm an alle") Benachrichtigungen und $(cards "Alarm an alle") Karten statt je 1 nach dem Wiedereinspielen"
+shot 23-oeffentlich-nach-fremdem
+
+# Der Notweg beim öffentlichen Alarm: Der Radar wird eine Meldung bei ntfy nicht los. Die App holt sie aus dem
+# Lagebericht. Eine Meldung über den Betrieb des Radars geht nur an den Betreiber, auch über den Notweg.
+n=$(reconcile)
+[ "$n" = 0 ] && ok "Öffentlicher Notweg: solange nichts fehlt, holt er nichts" || bad "Öffentlicher Notweg: Abgleich ohne fehlende Meldung ergab $n statt 0"
+radar schalter '{"radar_erreicht_ntfy": false}' > /dev/null
+log "Radar: $(radar radar/meldung '{"title": "Notweg an alle", "body": "Probe aus dem Emulator-Test: Diese Meldung wurde der Radar beim Push-Dienst nicht los.", "level": "alarm"}')"
+log "Radar: $(radar radar/meldung '{"title": "Nur an den Betreiber", "body": "Probe aus dem Emulator-Test: Meldung über den Betrieb des Radars.", "level": "warn", "scope": "operator"}')"
+n=$(reconcile)
+[ "$n" = 1 ] && ok "Öffentlicher Notweg: fehlende Meldung aus dem Lagebericht geholt" || bad "Öffentlicher Notweg: Abgleich ergab $n statt 1"
+if wait_notification "Notweg an alle" 20 > /dev/null; then ok "Öffentlicher Notweg: Alarm als Benachrichtigung"; else bad "Öffentlicher Notweg: Alarm nicht als Benachrichtigung"; fi
+page_has "$DBG" "Der Radar konnte diese Meldung nicht an ntfy übergeben" && ok "Öffentlicher Notweg: Liste zeigt die Meldung mit dem Grund" \
+  || bad "Öffentlicher Notweg: Meldung oder Grund fehlt in der Liste"
+[ "$(notifications "Nur an den Betreiber")" = 0 ] && [ "$(cards "Nur an den Betreiber")" = 0 ] \
+  && ok "Öffentlicher Notweg: Meldung über den Betrieb des Radars bleibt beim Betreiber" \
+  || bad "Öffentlicher Notweg: Meldung über den Betrieb des Radars kam beim öffentlichen Alarm an"
+# Im nächsten Lauf wird der Radar die Meldung doch noch los. Sie trägt dieselbe unterschriebene Kennung und tritt
+# still an die Stelle des Eintrags.
+radar schalter '{"radar_erreicht_ntfy": true}' > /dev/null
+log "Radar: $(radar radar/lauf '{"minuten_spaeter": 25}')"
+replaced=nein
+for _ in $(seq 1 20); do
+  [ "$(cards "Notweg an alle" "Verspätet zugestellt")" = 1 ] && replaced=ja && break
+  sleep 2
+done
+[ "$replaced" = ja ] && [ "$(cards "Notweg an alle")" = 1 ] && [ "$(cards "Notweg an alle" "Über den Notweg")" = 0 ] && [ "$(notifications "Notweg an alle")" = 1 ] \
+  && ok "Öffentlicher Notweg: spätere Zustellung ersetzt den Eintrag und läutet nicht noch einmal" \
+  || bad "Öffentlicher Notweg: nach der späteren Zustellung $(cards "Notweg an alle") Karten, davon $(cards "Notweg an alle" "Über den Notweg") vom Notweg, und $(notifications "Notweg an alle") Benachrichtigungen"
+
+# Die Seite "App" beim öffentlichen Alarm, Datenschutzerklärung und Impressum aus der App selbst, die Seite "Über uns".
+adb shell am start -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
+page_has "$DBG" "Unterschrift des Radars geprüft" && ok "Öffentlicher Alarm: die Seite „App“ nennt den Alarm und die geprüfte Unterschrift" \
+  || bad "Öffentlicher Alarm: Anzeige auf der Seite „App“ stimmt nicht"
+clean "$DBG" "Testbau: App beim öffentlichen Alarm"
+shot 24-oeffentlich-app
+tap "$DBG" "$(button '.legal-links .link-btn' Datenschutz)" > /dev/null
+page_has "$DBG" "Welche Verbindungen die App aufbaut" && ok "Datenschutzerklärung öffnet sich aus der App" || bad "Datenschutzerklärung fehlt in der App"
+clean "$DBG" "Testbau: Datenschutzerklärung"
+shot 25-datenschutz
+adb shell input keyevent KEYCODE_BACK
+sleep 2
+[ "$(page "$DBG" "document.getElementById('legal').classList.contains('show')")" = false ] && front "$DBG" \
+  && ok "Zurück schließt die Datenschutzerklärung, die App bleibt offen" || bad "Zurück schließt die Datenschutzerklärung nicht oder verlässt die App"
+tap "$DBG" "$(button '.legal-links .link-btn' Impressum)" > /dev/null
+page_has "$DBG" "Gewerbebehörde" && ok "Impressum öffnet sich aus der App" || bad "Impressum fehlt in der App"
+clean "$DBG" "Testbau: Impressum"
+shot 26-impressum
+tap "$DBG" "document.querySelector('#legal .icon-btn')" > /dev/null  # Pfeil zurück in der Kopfzeile
+adb shell am start -n "$DBG/$PKG.MainActivity" --es tab firma > /dev/null
+page_has "$DBG" "Wir vernetzen Sie!" && ok "Seite „Über uns“ wird angezeigt" || bad "Seite „Über uns“ fehlt"
+clean "$DBG" "Testbau: Über uns"
+layout "$DBG" "Über uns" && ok "Über uns: Kopfzeile und Leiste sitzen richtig" || bad "Über uns: Aufbau der Seite stimmt nicht"
+shot 27-ueber-uns
+adb shell input keyevent KEYCODE_BACK
+page_has "$DBG" "Laufender Stromausfall" && front "$DBG" && ok "Zurück führt von „Über uns“ zur Lage" || bad "Zurück führt von „Über uns“ nicht zur Lage"
 adb shell am force-stop "$DBG"
 
 # ------------------------------------------------- Fertige App gegen ntfy.sh
 publish "CI Vorab" 3 zap "Diese Meldung lag schon vor dem Einrichten auf dem Thema."
-sleep 3
+adb shell am start -W -n "$PKG/.MainActivity" > /dev/null
+page_has "$PKG" "Alarm bei großem Stromausfall" && ok "Fertige App: Willkommensseite beim ersten Öffnen" || bad "Fertige App: Willkommensseite fehlt"
+painted "fertige App, erster Start" && ok "Fertige App: Die Seite ist nach dem ersten Start am Bildschirm zu sehen" \
+  || bad "Fertige App: Der Bildschirm bleibt nach dem ersten Start leer"
+clean "$PKG" "fertige App: Willkommen"
+shot 01a-willkommen
+clip_read "$PKG" && bad "Fertige App: Zwischenablage schon auf der Willkommensseite gelesen ($(clip_note "$PKG"))" \
+  || ok "Fertige App: auf der Willkommensseite bleibt die Zwischenablage ungelesen"
+# Der Link aus der weitergegebenen Nachricht trifft die App, wenn sie nicht läuft: Sie startet damit und verbindet sich.
+adb shell am force-stop "$PKG"
 adb shell am start -W -a android.intent.action.VIEW -d "blackoutradar://abo/$TOPIC" -p "$PKG" > /dev/null
 page_has "$PKG" "Meldung der letzten 12 Stunden" && ok "Einrichten per Link: Thema übernommen, vorhandene Meldung gefunden" \
   || bad "Einrichten per Link: Ergebnis nicht wie erwartet"
@@ -441,11 +715,22 @@ else
 fi
 
 # Neustart des Handys
+# Android sagt den Apps der Reihe nach, dass das Handy hochgefahren ist (BOOT_COMPLETED), erst darauf startet die App
+# ihren Dienst. Wann sie an der Reihe ist, bestimmt Android: Im Lauf 19 lief der Dienst auf einem langsamen Emulator
+# mit Android 16 noch nicht, als der Test 25 s nach dem Hochfahren ein einziges Mal nachsah, und 7 s später war die
+# Meldung da. Der Test wartet deshalb bis zu 2 Minuten und hält fest, wie lange es dauerte und was Android dazu ins
+# Systemprotokoll schrieb.
 note_exits enden-vor-neustart.txt
+mark=$(adb shell "date '+%m-%d %H:%M:%S.000'" | tr -d '\r')
 adb reboot
 if wait_boot; then
-  sleep 25
-  service_running "$PKG" && ok "Dienst nach dem Neustart von selbst wieder gestartet" || bad "Dienst nach dem Neustart nicht gestartet"
+  if t=$(wait_service "$PKG" 120); then
+    ok "Dienst nach dem Neustart von selbst wieder gestartet, $t s nach dem Hochfahren"
+  else
+    bad "Dienst 120 s nach dem Neustart nicht gestartet"
+  fi
+  log "Android zum Neustart: $(system_says "$PKG" "$mark" | grep -vE 'START u0|Displayed ' | head -4 | tr '\n' '|')"
+  [ "${t:-25}" -lt 25 ] && sleep $((25 - t))  # wie bisher: Android nach dem Hochfahren Zeit lassen, bevor der Test weitermacht
   publish "CI Nach Neustart" 4 warning "Diese Meldung kam nach einem Neustart des Handys."
   if t=$(wait_notification "CI Nach Neustart" 180); then ok "Nach dem Neustart Meldung nach $t s"; else bad "Nach dem Neustart keine Meldung"; fi
 else
@@ -573,8 +858,22 @@ fi
 
 # Über eine vorhandene Installation gespielt, bleibt, was eingerichtet ist. Bringt die Datei ein anderes Thema mit,
 # fragt die App einmal nach und ersetzt nichts von selbst.
+mark=$(adb shell "date '+%m-%d %H:%M:%S.000'" | tr -d '\r')
+old=$(adb shell pidof "$DBG" | tr -d '\r')
 answer=$(adb install -r "$WORK/testbau-anderes.apk" 2>&1) && ok "Datei mit Thema: Android spielt sie über die vorhandene App, die Signatur gilt" \
   || bad "Datei mit Thema: ließ sich nicht über die vorhandene App spielen: $(tail -c 300 <<< "$answer" | tr '\n' ' ')"
+reported=$(adb shell "date '+%H:%M:%S.%N'" | tr -d '\r' | cut -c1-12)
+# Android meldet das Einspielen fertig, bevor es aufgeräumt hat: Gleich danach beendet es noch einmal alles, was zur
+# App gehört ("Force stopping … pkg removed"), auch ein Fenster, das in diesem Augenblick aufgeht. Erst dann erfährt
+# die App vom Update (MY_PACKAGE_REPLACED) und startet ihren Dienst wieder. Darauf wartet der Test, bevor er die App
+# öffnet. Ein Mensch tippt frühestens Sekunden später auf „Öffnen“. Ohne das Warten stand im Lauf 15 auf main
+# (Android 12) statt der Rückfrage der Startbildschirm da, und die App lief nur noch mit ihrem Dienst.
+if t=$(wait_restart "$DBG" "$old" 60); then
+  ok "Testbau: nach dem Update läuft der Dienst von selbst wieder, nach $t s"
+else
+  bad "Testbau: Dienst nach dem Update nicht von selbst wieder gestartet"
+fi
+log "Android zum Update (fertig gemeldet um $reported): $(system_says "$DBG" "$mark" | grep -vE 'START u0|Displayed ' | head -8 | tr '\n' '|')"
 adb shell am start -W -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
 page_has "$DBG" "Die Installationsdatei bringt ein anderes Thema mit" && ok "Datei mit anderem Thema: App fragt nach, statt das Thema zu ersetzen" \
   || bad "Datei mit anderem Thema: Rückfrage fehlt"
@@ -629,18 +928,214 @@ publish "CI Aus der Datei" 4 warning "Diese Meldung kam an dem Handy an, das die
 if t=$(wait_notification "CI Aus der Datei" 60); then ok "Fertige App aus der Datei: Meldung über ntfy.sh nach $t s angekommen"; else bad "Fertige App aus der Datei: Meldung über ntfy.sh nicht angekommen"; fi
 rm -rf "$WORK"
 
+# ------------------------------------------------- Fertige App: öffentlicher Alarm am echten Thema
+# Die fertige App kennt nur das echte Thema bei ntfy.sh und nur den echten Schlüssel. Der Test liest dort bloß mit
+# und schickt nichts hin: Dort lesen fremde Menschen. Geprüft wird, dass sich der Alarm in der fertigen App
+# einschalten lässt und dass sie genau die Meldungen zeigt, die auch der Radar selbst als echt anerkennt
+# (blackout_radar/sign.py). Solange der Radar dort noch nichts geschickt hat, sind das null Meldungen.
+real_alarms() {  # -> Zahl der gültig unterschriebenen Meldungen, die das echte Thema gerade hergibt, oder "unbekannt"
+  python3 - << 'PRUEFEN' 2> /dev/null || echo unbekannt
+import json, sys, urllib.request
+sys.path.insert(0, ".")
+from blackout_radar import sign
+topic = "blackout-radar-alarm"
+with urllib.request.urlopen(f"https://ntfy.sh/{topic}/json?poll=1&since=all", timeout=20) as answer:
+    lines = answer.read().decode("utf-8").splitlines()
+seen = set()
+for line in lines:
+    item = json.loads(line)
+    if item.get("event") != "message":
+        continue
+    fields = sign.unseal(sign.PUBLIC_KEYS, topic, item.get("title", ""), item.get("message", ""), item.get("click", ""))
+    if fields and item["time"] - fields["t"] <= 13 * 3600:  # wie die App: was ntfy erst viel später bekam, zählt nicht
+        seen.add((fields["t"], fields["i"]))
+print(len(seen))
+PRUEFEN
+}
+adb shell am start -n "$PKG/.MainActivity" --es tab app > /dev/null
+page_has "$PKG" "Thema ändern" > /dev/null
+tap "$PKG" "$(button .btn.danger 'Thema ändern')" > /dev/null
+page_has "$PKG" "Die App vergisst das bisherige Thema" > /dev/null
+tap "$PKG" "document.querySelector('#modal .btn.danger')" > /dev/null
+page_has "$PKG" "Alarme auf dieses Handy holen" > /dev/null
+tap "$PKG" "document.getElementById('back')" > /dev/null
+page_has "$PKG" "Alarm bei großem Stromausfall" && ok "Fertige App: von „Thema ändern“ zurück zur Willkommensseite" \
+  || bad "Fertige App: Willkommensseite nach „Thema ändern“ nicht erreicht"
+before=$(real_alarms)
+tap "$PKG" "document.getElementById('enable')" > /dev/null
+if t=$(wait_page "$PKG" "Alarm ist eingeschaltet" 60); then
+  ok "Fertige App: öffentlicher Alarm am echten Thema nach $t s eingeschaltet"
+else
+  bad "Fertige App: öffentlicher Alarm ließ sich nicht einschalten"
+fi
+clean "$PKG" "fertige App: öffentlicher Alarm eingeschaltet"
+shot 28-fertige-app-oeffentlich
+tap "$PKG" "document.querySelector('.result .btn.primary')" > /dev/null  # Knopf "Weiter"
+adb shell am start -n "$PKG/.MainActivity" --es tab meldungen > /dev/null
+page_has "$PKG" "Die App behält die letzten 300 Meldungen" > /dev/null || page_has "$PKG" "Noch keine Meldungen" > /dev/null
+shown=$(page "$PKG" "document.querySelectorAll('.msg').length")
+after=$(real_alarms)
+log "Echtes Thema: gültig unterschrieben vorher $before, nachher $after, in der App $shown"
+if [ "$before" = unbekannt ] && [ "$after" = unbekannt ]; then
+  log "Echtes Thema vom Rechner aus nicht lesbar, Vergleich übersprungen"
+elif [ "$shown" = "$before" ] || [ "$shown" = "$after" ]; then
+  ok "Fertige App: zeigt vom echten Thema genau die $shown gültig unterschriebenen Meldungen"
+else
+  bad "Fertige App: zeigt $shown Meldungen vom echten Thema, gültig unterschrieben sind $before (vorher) und $after (nachher)"
+fi
+adb shell am start -n "$PKG/.MainActivity" --es tab app > /dev/null
+page_has "$PKG" "Unterschrift des Radars geprüft" && ok "Fertige App: die Seite „App“ nennt den öffentlichen Alarm" \
+  || bad "Fertige App: Anzeige des öffentlichen Alarms auf der Seite „App“ stimmt nicht"
+clean "$PKG" "fertige App: App beim öffentlichen Alarm"
+shot 29-fertige-app-oeffentlich-app
+
+# ------------------------------------------------- Testbau der Fassung für Google Play
+# Dasselbe Programm unter eigenem Paketnamen, so wie es über Google Play kommt: ohne eigene Suche nach neuen
+# Fassungen und ohne Weitergabe als Datei. Der Testbau davon muss starten, den öffentlichen Alarm einschalten und
+# einen unterschriebenen Alarm melden. Die anderen beiden Apps sind zu dieser Zeit nicht am Thema "alarm-test".
+adb install -r "$APK_DIR/blackout-radar-play-test.apk" > /dev/null && ok "Play: Testbau der Fassung für Google Play installiert" \
+  || bad "Play: Testbau der Fassung für Google Play ließ sich nicht installieren"
+grant_and_exempt "$PLAY"
+adb shell am start -W -n "$PLAY/$PKG.MainActivity" > /dev/null
+page_has "$PLAY" "Alarm bei großem Stromausfall" && ok "Play: Willkommensseite wird angezeigt" || bad "Play: Willkommensseite fehlt"
+painted "Play, erster Start" && ok "Play: Die Seite ist nach dem ersten Start am Bildschirm zu sehen" \
+  || bad "Play: Der Bildschirm bleibt nach dem ersten Start leer"
+clean "$PLAY" "Play: Willkommen"
+shot 30-play-willkommen
+log "Play: $(debug_in "$PLAY" --es oeffentlich "$ALARM" --es status http://10.0.2.2:8765)"
+tap "$PLAY" "document.getElementById('enable')" > /dev/null
+if t=$(wait_page "$PLAY" "Alarm ist eingeschaltet" 40); then ok "Play: öffentlicher Alarm nach $t s eingeschaltet"; else bad "Play: öffentlicher Alarm ließ sich nicht einschalten"; fi
+tap "$PLAY" "document.querySelector('.result .btn.primary')" > /dev/null  # Knopf "Weiter"
+page_has "$PLAY" "Laufender Stromausfall" && ok "Play: Lagebericht wird angezeigt" || bad "Play: Lagebericht fehlt"
+clean "$PLAY" "Play: Lage"
+unnamed "$PLAY" "Play: Lage"
+layout "$PLAY" "Play" && ok "Play: Kopfzeile und Leiste sitzen richtig" || bad "Play: Aufbau der Seite stimmt nicht"
+# Diese Fassung führt unten nur "Lage" und "Meldungen". Die Einstellungen liegen hinter dem Zahnrad, "Über uns" hinter
+# dem Namen in der Kopfzeile. Aktualisiert wird beim Stand des Lageberichts.
+bar=$(page "$PLAY" "[...document.querySelectorAll('nav.tabs button')].map(b => b.textContent.trim()).join(', ')")
+[ "$bar" = "Lage, Meldungen" ] && ok "Play: Leiste unten zeigt nur Lage und Meldungen" || bad "Play: Leiste unten zeigt „$bar“ statt „Lage, Meldungen“"
+title_whole "$PLAY" "Play" && ok "Play: Name der App steht in der Kopfzeile ganz da" || bad "Play: Name der App ist in der Kopfzeile abgeschnitten"
+# Breite der Schrift in der Zeile unter dem Namen, als Maß dafür, ob eine größere Schrift später in der Seite ankommt
+by_width() { page "$PLAY" "(e => { const r = document.createRange(); r.selectNodeContents(e); return Math.round(r.getBoundingClientRect().width); })(document.querySelector('header.top .by'))"; }
+by_normal=$(by_width)
+shot 31-play-lage
+for _ in $(seq 1 30); do service_running "$PLAY" && break; sleep 1; done
+service_running "$PLAY" && ok "Play: Hintergrunddienst läuft" || bad "Play: Hintergrunddienst läuft nicht"
+# Diese Fassung kennt nur den öffentlichen Alarm. Für Links zu einem eigenen Radar (blackoutradar://abo/<thema>)
+# meldet sie sich bei Android nicht an. Die Fassung von GitHub tut das, sie ist hier die Gegenprobe. Schickt jemand
+# so einen Link gezielt an die App, ändert sich nichts: keine Rückfrage, keine Seite zum Einrichten. Dass der
+# öffentliche Alarm danach noch eingeschaltet ist, zeigt der unterschriebene Alarm gleich darauf.
+takers=$(adb shell cmd package query-activities --components -a android.intent.action.VIEW -d "blackoutradar://abo/fremdes-thema" 2>&1 | tr -d '\r')
+log "Play: Für Links zu einem eigenen Radar melden sich an: $(tr '\n' ' ' <<< "$takers")"
+if grep -q "^[[:space:]]*$PKG/" <<< "$takers" && ! grep -q "$PLAY/" <<< "$takers"; then
+  ok "Play: für Links zu einem eigenen Radar meldet sich die Fassung von GitHub an, diese Fassung nicht"
+else
+  bad "Play: Anmeldung für Links zu einem eigenen Radar stimmt nicht"
+fi
+log "Play: Link gezielt an die App: $(adb shell am start -W -a android.intent.action.VIEW -d "blackoutradar://abo/fremdes-thema" -n "$PLAY/$PKG.MainActivity" 2>&1 | tr -d '\r' | tr '\n' ' ')"
+sleep 3
+calm=$(page "$PLAY" "!document.querySelector('#modal.show') && !document.getElementById('topic') && document.body.innerText.includes('Laufender Stromausfall')")
+[ "$calm" = true ] && ok "Play: ein Link zu einem eigenen Radar ändert nichts, die App bleibt bei der Lage und fragt nicht nach" \
+  || bad "Play: ein Link zu einem eigenen Radar hat die Seite verändert ($(page "$PLAY" "(document.querySelector('#modal.show') || document.body).innerText.slice(0, 120)" | tr '\n' ' '))"
+log "Radar: $(radar radar/meldung '{"title": "Alarm im Play-Bau", "body": "Probe aus dem Emulator-Test: unterschriebener Alarm für die Fassung für Google Play.", "level": "alarm"}')"
+arrived=nein
+for _ in $(seq 1 20); do
+  notified_by "$PLAY" "Alarm im Play-Bau" && arrived=ja && break
+  sleep 2
+done
+[ "$arrived" = ja ] && ok "Play: unterschriebener Alarm als Benachrichtigung dieser Fassung" || bad "Play: unterschriebener Alarm kam nicht an"
+tap "$PLAY" "$(button 'nav.tabs button' Meldungen)" > /dev/null
+page_has "$PLAY" "Alarm im Play-Bau" && ok "Play: Liste der Meldungen zeigt den Alarm" || bad "Play: Alarm fehlt in der Liste der Meldungen"
+clean "$PLAY" "Play: Meldungen"
+unnamed "$PLAY" "Play: Meldungen"
+shot 32-play-meldungen
+[ "$(tap "$PLAY" "document.getElementById('settings')")" = ja ] || bad "Play: Zahnrad in der Kopfzeile fehlt"
+page_has "$PLAY" "Neue Versionen kommen über den Play Store" && ok "Play: Zahnrad öffnet die Einstellungen, neue Fassungen kommen über den Store" \
+  || bad "Play: Einstellungen oder Hinweis auf den Play Store fehlen"
+foreign=$(page "$PLAY" "['Nach neuer Version suchen', 'Neue Version herunterladen', 'App samt Thema weitergeben', 'Eigenen Radar verbinden', 'Lagebericht bei GitHub'].filter(t => document.body.innerText.includes(t)).join(', ') || 'nichts'")
+[ "$foreign" = nichts ] && ok "Play: keine eigene Suche nach neuen Fassungen, keine Weitergabe als Datei, kein eigener Radar" \
+  || bad "Play: Die Einstellungen bieten an, was es über den Store nicht geben darf: ${foreign:-Seite nicht lesbar}"
+clean "$PLAY" "Play: Einstellungen"
+unnamed "$PLAY" "Play: Einstellungen"
+shot 33-play-einstellungen
+[ "$(tap "$PLAY" "document.getElementById('about')")" = ja ] || bad "Play: Knopf „Über ASE-IT“ fehlt in den Einstellungen"
+page_has "$PLAY" "Wir vernetzen Sie!" && ok "Play: Seite „Über uns“ wird angezeigt" || bad "Play: Seite „Über uns“ fehlt"
+clean "$PLAY" "Play: Über uns"
+unnamed "$PLAY" "Play: Über uns"
+shot 34-play-ueber-uns
+# Zurück führt eine Ebene zurück: von "Über uns" zu den Einstellungen, von dort zu den Meldungen, von dort zur Lage.
+sub() { page "$PLAY" "(h => h ? h.textContent : (b => b ? b.textContent.trim() : '')(document.querySelector('nav.tabs button[aria-selected=\"true\"]')))([...document.querySelectorAll('.subhead h2')].find(h => h.offsetParent))"; }
+way=""
+for _ in 1 2 3; do
+  adb shell input keyevent KEYCODE_BACK
+  sleep 2
+  way="$way$(sub), "
+done
+[ "$way" = "Einstellungen, Meldungen, Lage, " ] && front "$PLAY" && ok "Play: Zurück führt von „Über uns“ über Einstellungen und Meldungen zur Lage, die App bleibt offen" \
+  || bad "Play: Zurück führte von „Über uns“ über „${way}“ statt über Einstellungen, Meldungen und Lage, oder die App ist nicht mehr vorn"
+[ "$(tap "$PLAY" "document.getElementById('brand')")" = ja ] || bad "Play: Name in der Kopfzeile ist kein Knopf"
+page_has "$PLAY" "Wir vernetzen Sie!" && ok "Play: Der Name in der Kopfzeile führt zu „Über uns“" || bad "Play: Der Name in der Kopfzeile führt nicht zu „Über uns“"
+tap "$PLAY" "$(button '.legal-links .link-btn' Impressum)" > /dev/null
+page_has "$PLAY" "Gewerbebehörde" && ok "Play: Impressum öffnet sich aus der App" || bad "Play: Impressum fehlt in der App"
+outside=$(page "$PLAY" "(l => ((/github|ntfy/i.test(l.textContent) ? 'nennt GitHub oder ntfy ' : '') + (l.textContent.includes('Im Browser öffnen') ? 'verweist in den Browser' : '')) || 'sauber')(document.getElementById('legal'))")
+[ "$outside" = sauber ] && ok "Play: Impressum nennt keine fremden Dienste und verweist nicht nach außen" || bad "Play: Impressum ${outside:-nicht lesbar}"
+shot 35-play-impressum
+adb shell input keyevent KEYCODE_BACK
+sleep 2
+adb shell input keyevent KEYCODE_BACK
+page_has "$PLAY" "Laufender Stromausfall" > /dev/null
+
+# Schmales Handy mit großer Schrift: 360 dp ist die häufigste Breite, und Android vergrößert in der App die Schrift
+# der Seite mit der Schriftgröße des Handys. Der Name der App muss in der Kopfzeile trotzdem ganz zu lesen sein.
+pixels=$(adb shell wm size | tr -d '\r' | sed -n 's/.*Physical size: \([0-9]*\)x.*/\1/p')
+adb shell wm density $((${pixels:-1080} * 160 / 360)) > /dev/null
+adb shell settings put system font_scale 1.3 > /dev/null
+sleep 5
+adb shell am start -W -n "$PLAY/$PKG.MainActivity" > /dev/null
+wait_page "$PLAY" "Laufender Stromausfall" 40 > /dev/null || log "Play: Seite nach dem Umstellen von Breite und Schrift nicht lesbar"
+narrow=$(page "$PLAY" "innerWidth")
+by_big=$(by_width)
+log "Play, schmal und große Schrift: Seite ${narrow:-?} breit, Zeile unter dem Namen $by_normal -> ${by_big:-?} breit"
+if [[ "$narrow" =~ ^[0-9]+$ ]] && [ "$narrow" -le 361 ] && [[ "$by_big" =~ ^[0-9]+$ ]] && [[ "$by_normal" =~ ^[0-9]+$ ]] && [ $((by_big * 100)) -ge $((by_normal * 120)) ]; then
+  title_whole "$PLAY" "Play, 360 dp und Schrift 130 %" && layout "$PLAY" "Play, 360 dp und Schrift 130 %" \
+    && ok "Play: Name der App bleibt auf 360 dp Breite mit großer Schrift ganz lesbar" \
+    || bad "Play: Kopfzeile stimmt auf 360 dp Breite mit großer Schrift nicht"
+else
+  bad "Play: Breite 360 dp und große Schrift kamen in der Seite nicht an (Seite ${narrow:-?} breit, Zeile unter dem Namen $by_normal -> ${by_big:-?})"
+fi
+clean "$PLAY" "Play: Lage, schmal und große Schrift"
+shot 36-play-schmal-grosse-schrift
+[ "$(tap "$PLAY" "document.getElementById('settings')")" = ja ] && page_has "$PLAY" "Neue Versionen kommen über den Play Store" > /dev/null
+title_whole "$PLAY" "Play, Einstellungen, 360 dp und Schrift 130 %" && layout "$PLAY" "Play, Einstellungen, 360 dp und Schrift 130 %" \
+  && ok "Play: Einstellungen sitzen auf 360 dp Breite mit großer Schrift richtig" || bad "Play: Einstellungen stimmen auf 360 dp Breite mit großer Schrift nicht"
+shot 37-play-einstellungen-schmal
+adb shell settings put system font_scale 1.0 > /dev/null
+adb shell wm density reset > /dev/null
+sleep 5
+
+[ -z "$NAMED" ] && ok "Play: keine der $NAMED_PAGES geprüften Seiten nennt GitHub oder ntfy" || bad "Play nennt GitHub oder ntfy auf:$NAMED"
+# Kein Bild des Laufs darf eine leere Fläche zeigen: Dann stand die Seite zwar in der App, war aber nicht zu sehen.
+verdicts=$(java -Djava.awt.headless=true "$HERE/Vorschau.java" inhalt "$OUT"/[0-9]*.png 2> /dev/null)
+pictures=$(find "$OUT" -maxdepth 1 -name '[0-9]*.png' | wc -l)
+shown=$(grep -c ': Inhalt ' <<< "$verdicts")
+if [ "$pictures" -gt 0 ] && [ "$shown" -eq "$pictures" ]; then
+  ok "Alle $pictures Bilder des Laufs zeigen Inhalt, keines eine leere Seite"
+else
+  bad "Bilder ohne Inhalt ($shown von $pictures zeigen etwas): $(grep -v ': Inhalt ' <<< "$verdicts" | tr '\n' ';')"
+fi
 [ -z "$STRAY" ] && ok "Keine der $PAGES geprüften Seiten zeigt Fremdtext wie „null“" || bad "Fremdtext wie „null“ in der Seite:$STRAY"
 
 adb logcat -d > "$OUT/logcat.txt" 2>&1
 adb shell dumpsys notification --noredact > "$OUT/benachrichtigungen.txt" 2>&1
 adb shell dumpsys activity services "$PKG" > "$OUT/dienste.txt" 2>&1
+adb shell dumpsys activity services "$PLAY" >> "$OUT/dienste.txt" 2>&1
 rm -f "$OUT/seite-fehler.txt" "$OUT/vergleich-fehler.txt"
 
 # Ist die fertige App oder der Testbau im Lauf abgestürzt oder hängen geblieben?
 note_exits enden-am-schluss.txt
 log "Prozessenden im Lauf: $(sort -u "$OUT/enden-vor-neustart.txt" "$OUT/enden-vor-datei.txt" "$OUT/enden-am-schluss.txt" | tr '\n' ';')"
 died=$(sort -u "$OUT/enden-vor-neustart.txt" "$OUT/enden-vor-datei.txt" "$OUT/enden-am-schluss.txt" | grep -E "$BAD_EXIT")
-found=$(reports "$PKG" fehlerberichte.txt)
+found=$(reports "$PKG" fehlerberichte.txt; reports "$PLAY" fehlerberichte-play.txt)
 if [ -n "$died" ] || [ -n "$found" ]; then
   bad "Die App ist im Lauf abgestürzt oder hängen geblieben"
   [ -n "$died" ] && echo "$died"

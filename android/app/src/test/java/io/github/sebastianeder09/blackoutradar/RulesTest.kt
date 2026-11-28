@@ -35,6 +35,26 @@ class RulesTest {
     }
 
     @Test
+    fun warnungZumStillstandNenntGitHubNurBeimEigenenRadar() {
+        val hours = 4 * hour
+        // Eigener Radar in der Fassung von GitHub: Wer ihn betreibt, soll wissen, wo er nachsehen muss.
+        val own = MonitorWatch.staleText(hours, public = false, play = false)
+        assertTrue(own, own.startsWith("Der letzte Lagebericht ist 4 h 00 min alt. "))
+        assertTrue(own, own.contains("GitHub"))
+        // Öffentlicher Alarm und die Fassung aus dem Play Store: kein Wort davon, wo der Radar läuft.
+        for (text in listOf(
+            MonitorWatch.staleText(hours, public = true, play = false),
+            MonitorWatch.staleText(hours, public = true, play = true),
+            MonitorWatch.staleText(hours, public = false, play = true),
+        )) {
+            assertTrue(text, text.startsWith("Der letzte Lagebericht ist 4 h 00 min alt. "))
+            assertFalse(text, text.contains("GitHub", ignoreCase = true))
+            assertFalse(text, text.contains("ntfy", ignoreCase = true))
+            assertTrue(text, text.contains("keine Alarme"))
+        }
+    }
+
+    @Test
     fun zeitspannenWieImLagebericht() {
         assertEquals("0 min", MonitorWatch.age(-5))
         assertEquals("45 min", MonitorWatch.age(45 * 60_000L))

@@ -91,7 +91,7 @@ Der nächste Lauf des Radars startet die Kette von selbst. Sofort geht es von Ha
 
 **5. Öffentlicher Alarm für alle (freiwillig)**
 
-Das Thema aus Schritt 1 ist privat und wirkt wie ein Passwort. Daneben gibt es einen zweiten Weg für alle, die nur die App installieren: ein festes, öffentliches Thema (`blackout-radar-alarm` bei ntfy.sh), das in der App schon eingebaut ist. Installieren, öffnen, fertig.
+Das Thema aus Schritt 1 ist privat und wirkt wie ein Passwort. Daneben gibt es einen zweiten Weg für alle, die nur die App installieren: ein festes, öffentliches Thema (`blackout-radar-alarm` bei ntfy.sh), das in der App schon eingebaut ist. Installieren, öffnen, auf „Alarm einschalten“ tippen.
 
 Ein öffentliches Thema kann jeder lesen und jeder beschreiben. Deshalb unterschreibt der Radar dort jede Meldung, und die App prüft die Unterschrift:
 
@@ -253,6 +253,7 @@ Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anze
 | `.github/workflows/monitor.yml` | Lauf alle 5 Minuten, Zustand im Zweig `state` |
 | `.github/workflows/ci.yml` | Tests und Probelauf gegen die echten Datenquellen bei jeder Änderung |
 | `android/` | Android-App: Push über ntfy, Alarmton, Lagebericht, siehe [android/README.md](android/README.md) |
+| `docs/` | Impressum und Datenschutzerklärung der App. Dieselben Texte stecken in der App |
 | `.github/workflows/android.yml` | baut die App, prüft sie im Emulator und veröffentlicht sie unter *Releases* |
 
 Datenquellen: Energy-Charts (Fraunhofer ISE, Daten von ENTSO-E, CC BY 4.0, energy-charts.info), netzfrequenzmessung.de, Google News, Nachrichten-Feeds von Medien in Amerika, Asien und Australien, Störmeldungen der LINZ NETZ GmbH. Gemeindeverzeichnis: STATISTIK AUSTRIA.

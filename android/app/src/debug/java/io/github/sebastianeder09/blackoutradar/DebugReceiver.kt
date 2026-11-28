@@ -35,6 +35,12 @@ import android.content.Intent
  * Damit holt der Emulator-Test die Datei so ab, wie es ein Messenger täte: von außen und nur mit dieser Erlaubnis.
  * Die Antwort nennt dann "freigabe=true", oder "freigabe=false", wenn es die Datei noch nicht gibt.
  *
+ * Mit "--es oeffentlich http://10.0.2.2:8765/alarm-test" merkt sich der Testbau, wohin er sich für den öffentlichen
+ * Alarm verbindet: zum nachgestellten Server statt zum festen Thema bei ntfy.sh. Eingeschaltet wird der Alarm
+ * damit noch nicht, das tut der Knopf "Alarm einschalten" in der App. Die Unterschrift prüft der Testbau wie die
+ * fertige App, nur dass er zusätzlich den Testschlüssel annimmt (Signed.KEYS). Die Antwort nennt dann
+ * "oeffentlich=true", oder "oeffentlich=false", wenn die Angabe kein Ziel ist.
+ *
  * Mit "--ez absturz true" stürzt der Testbau absichtlich ab. Damit prüft der Emulator-Test,
  * dass er einen Absturz der App auch bemerkt.
  */
@@ -46,6 +52,7 @@ class DebugReceiver : BroadcastReceiver() {
         Thread({
             try {
                 intent.getStringExtra("status")?.let { Store.get(app).statusBaseOverride = it }
+                val public = intent.getStringExtra("oeffentlich")?.let { ", oeffentlich=" + aimPublic(app, it) } ?: ""
                 val setup = intent.getStringExtra("ziel")?.let { Sync.setup(app, it, allowHttp = true) }
                 val status = if (intent.hasExtra("status")) StatusRepo.refresh(app, 8_000) else null
                 if (intent.getBooleanExtra("ausgeruht", false)) Store.get(app).statusCheckedAt = 0L
@@ -56,11 +63,18 @@ class DebugReceiver : BroadcastReceiver() {
                 } else ""
                 pending.resultData = "einrichten: " +
                     (setup?.let { "ok=${it.ok} meldungen=${it.count} ohne-netz=${it.offline}" } ?: "nein") +
-                    ", lagebericht=" + (status ?: "nein") + copied + granted + check
+                    ", lagebericht=" + (status ?: "nein") + public + copied + granted + check
             } finally {
                 pending.finish()
             }
         }, "testbau").start()
+    }
+
+    /** Merkt sich das Ziel des öffentlichen Alarms für die Prüfung. false, wenn die Angabe kein Ziel ist. */
+    private fun aimPublic(context: Context, input: String): Boolean {
+        if (Ntfy.parseTarget(input, allowHttp = true) == null) return false
+        Store.get(context).publicOverride = input
+        return true
     }
 
     /** Erlaubt der Kommandozeile von adb, die Datei zum Weitergeben zu lesen. Andere Apps bleiben draußen. */

@@ -37,6 +37,9 @@ data class Notice(
     /** Wahr, wenn die Meldung nicht über ntfy kam, sondern über den Notweg. */
     val fallback: Boolean get() = via.isNotEmpty()
 
+    /** Wahr, wenn die Meldung aus dem öffentlichen Alarm stammt (siehe [PublicAlarm.id]). */
+    val public: Boolean get() = id.startsWith(PublicAlarm.ID_PREFIX)
+
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
         .put("time", time)
@@ -75,6 +78,18 @@ data class Notice(
         private fun text(json: JSONObject, key: String): String =
             if (json.isNull(key)) "" else json.optString(key, "")
     }
+}
+
+/** Die Dringlichkeiten des Radars und wie ntfy sie kennzeichnet (im Radar: NTFY_PRIORITY und NTFY_TAGS). */
+object Levels {
+    private val PRIORITY = mapOf("alarm" to 5, "warn" to 4, "info" to 3, "ok" to 3, "daily" to 2)
+    private val TAGS = mapOf("alarm" to "rotating_light", "warn" to "warning", "info" to "zap",
+        "ok" to "white_check_mark", "daily" to "bar_chart")
+
+    /** Eine unbekannte Dringlichkeit gilt als gewöhnliche Meldung. */
+    fun priority(level: String): Int = PRIORITY[level] ?: 3
+
+    fun tags(level: String): List<String> = listOfNotNull(TAGS[level])
 }
 
 /** Eine Zeile aus dem Datenstrom von ntfy. */
@@ -176,14 +191,15 @@ object Ntfy {
         else "$LINK_PREFIX?thema=" + URLEncoder.encode(plain(target), "UTF-8")
 
     /**
-     * Nachricht zum Weitergeben an ein weiteres Handy. Wer sie dort kopiert und die App öffnet, findet das
-     * Thema schon im Feld ([sharedTarget]) und tippt nur noch auf "Verbinden".
+     * Nachricht zum Weitergeben an ein weiteres Handy. Wer sie dort kopiert und in der App die Seite zum
+     * Verbinden des eigenen Radars öffnet, findet das Thema schon im Feld ([sharedTarget]) und tippt nur noch
+     * auf "Verbinden".
      */
     fun shareText(target: Target, downloadUrl: String): String =
         "Blackout-Radar: Alarm aufs Handy bei einem großen Stromausfall.\n\n" +
             "1. App herunterladen und installieren:\n$downloadUrl\n\n" +
-            "2. Diese ganze Nachricht kopieren und die App öffnen. Sie trägt das Thema selbst ein, " +
-            "du tippst nur noch auf „Verbinden“.\n\n" +
+            "2. Diese ganze Nachricht kopieren, die App öffnen und auf „Eigenen Radar verbinden“ tippen. " +
+            "Sie trägt das Thema selbst ein, du tippst nur noch auf „Verbinden“.\n\n" +
             link(target)
 
     /**

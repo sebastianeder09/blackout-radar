@@ -2,6 +2,7 @@ package io.github.sebastianeder09.blackoutradar
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.annotation.TargetApi
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
@@ -28,6 +29,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import org.json.JSONObject
 import java.io.IOException
 import java.util.UUID
@@ -47,7 +50,9 @@ class MainActivity : Activity() {
     private var pendingTab: String? = null
     private var pendingOffer: Target? = null
     private var clipSeenAt = 0L
+    private var clipWanted = false
     private var notifyQueued = false
+    private var backGesture: BackGesture? = null
 
     private val stateListener: () -> Unit = {
         handler.post {
@@ -133,8 +138,13 @@ class MainActivity : Activity() {
         if (pageReady) showTab(tab) else pendingTab = tab
     }
 
-    /** Liest das Thema aus einem Link wie blackoutradar://abo/thema oder blackoutradar://abo?thema=thema. */
+    /**
+     * Liest das Thema aus einem Link wie blackoutradar://abo/thema oder blackoutradar://abo?thema=thema.
+     * Die Fassung aus dem Play Store meldet sich für solche Links gar nicht an (das tut nur das Manifest der
+     * Fassung von GitHub). Kommt trotzdem einer an, gilt er nicht: Diese Fassung kennt nur den öffentlichen Alarm.
+     */
     private fun linkTarget(intent: Intent?): Target? {
+        if (PublicAlarm.ONLY) return null
         val data = intent?.data ?: return null
         if (intent.action != Intent.ACTION_VIEW) return null
         return Ntfy.parseLink(data.toString())
@@ -177,16 +187,18 @@ class MainActivity : Activity() {
     }
 
     /**
-     * Noch kein Thema eingerichtet: Hat der Mensch die weitergegebene Nachricht eines anderen Handys kopiert,
-     * trägt die App das Thema daraus selbst ins Feld ein. Verbinden tippt er selbst. Aus der Zwischenablage
-     * zählt nur der Link der App. Alles andere darin bleibt unberührt und verlässt diese Funktion nicht.
+     * Die Seite zum Verbinden des eigenen Radars ist offen: Hat der Mensch die weitergegebene Nachricht eines
+     * anderen Handys kopiert, trägt die App das Thema daraus selbst ins Feld ein. Verbinden tippt er selbst. Aus
+     * der Zwischenablage zählt nur der Link der App. Alles andere darin bleibt unberührt und verlässt diese
+     * Funktion nicht.
      *
      * Android lässt eine App nur in die Zwischenablage sehen, solange ihr Fenster vorn ist, und zeigt ab
      * Android 12 kurz an, dass sie es getan hat. Deshalb sieht die App jeden Inhalt nur einmal an, und nur
-     * solange die Einrichtungsseite offen ist.
+     * solange diese eine Seite offen ist ([clipWanted]). Wer nur den öffentlichen Alarm einschaltet, dessen
+     * Zwischenablage sieht die App nie an.
      */
     private fun offerCopied(again: Boolean = true) {
-        if (!pageReady || !hasWindowFocus() || store.target != null) return
+        if (!pageReady || !clipWanted || !hasWindowFocus() || store.target != null) return
         // Bringt die Installationsdatei das Thema mit, braucht es die Zwischenablage nicht.
         if (AppFile.pending(this) != null) return
         val text = try {
@@ -232,7 +244,7 @@ class MainActivity : Activity() {
         if (now - store.statusFetchedAt > 2 * 60_000L && !AppState.statusLoading) {
             Thread({ loadStatus(app) }, "lagebericht").start()
         }
-        if (now - store.updateCheckedAt > Updates.CHECK_EVERY_MS) {
+        if (Updates.ENABLED && now - store.updateCheckedAt > Updates.CHECK_EVERY_MS) {
             Thread({ Updates.check(app) }, "update").start()
         }
     }
@@ -245,6 +257,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         AppState.removeListener(stateListener)
         handler.removeCallbacksAndMessages(null)
+        armBack(false)
         webView?.let {
             root.removeView(it)
             it.destroy()
@@ -259,7 +272,22 @@ class MainActivity : Activity() {
         js("window.BR&&BR.changed()")
     }
 
-    @Deprecated("Android ruft das bis einschließlich Version 15 für die Zurück-Geste auf.")
+    /**
+     * Die Zurück-Geste ab Android 13. Dort fragt Android nicht mehr im Augenblick der Geste, ob die App sie
+     * selbst behandelt: Die App meldet das vorher an. Die Seite sagt deshalb laufend, ob sie gerade etwas zum
+     * Zurückgehen hat (ein Dialog, eine Unterseite, ein anderer Tab als "Lage"). Sonst schließt die Geste die App.
+     */
+    private fun armBack(armed: Boolean) {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (armed && backGesture == null) {
+            backGesture = BackGesture(this) { js("window.BR&&BR.back()") }
+        } else if (!armed) {
+            backGesture?.release()
+            backGesture = null
+        }
+    }
+
+    @Deprecated("Android ruft das bis einschließlich Version 12 für die Zurück-Geste auf, danach gilt armBack.")
     override fun onBackPressed() {
         val view = webView
         if (view == null || !pageReady) {
@@ -426,7 +454,7 @@ class MainActivity : Activity() {
             val array = org.json.JSONArray()
             for (notice in store.log.all()) {
                 array.put(notice.toJson().put("level", notice.level).put("symbols", Ntfy.emoji(notice.tags))
-                    .put("viaText", Fallback.reason(notice.via)))
+                    .put("viaText", Fallback.reason(notice.via, notice.public)))
             }
             return array.toString()
         }
@@ -454,17 +482,28 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun setTopic(text: String) {
+            connect("einrichten") { Sync.setup(it, text) }
+        }
+
+        /** Schaltet den öffentlichen Alarm ein: das feste Thema für alle. Einzugeben ist dafür nichts. */
+        @JavascriptInterface
+        fun enablePublic() {
+            connect("einschalten") { Sync.setupPublic(it) }
+        }
+
+        private fun connect(name: String, setup: (Context) -> Sync.SetupResult) {
             val app = applicationContext
             Thread({
-                val result = Sync.setup(app, text)
+                val result = setup(app)
                 val json = JSONObject().put("ok", result.ok).put("error", result.error)
                     .put("count", result.count).put("offline", result.offline)
+                    .put("public", result.ok && PublicAlarm.active(store))
                 runOnUiThread {
                     js("window.BR&&BR.onSetup($json)")
                     if (result.ok) askPermissionsOnce()
                 }
                 if (result.ok) loadStatus(app)
-            }, "einrichten").start()
+            }, name).start()
         }
 
         @JavascriptInterface
@@ -482,6 +521,25 @@ class MainActivity : Activity() {
             runOnUiThread {
                 try {
                     startActivity(Intent.createChooser(send, "Weitergeben"))
+                } catch (e: ActivityNotFoundException) {
+                    // Dieses Gerät hat keine App, die Text annimmt.
+                }
+            }
+        }
+
+        /**
+         * Empfiehlt die App weiter: Android zeigt seine Auswahl mit einem kurzen Text und dem Weg zur App.
+         * Ein Thema steht nicht darin. Wer die App so bekommt, schaltet den öffentlichen Alarm selbst ein.
+         */
+        @JavascriptInterface
+        fun recommend() {
+            val send = Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_TEXT, "Blackout-Radar: Alarm aufs Handy bei einem großen Stromausfall in Österreich. " +
+                    "Kostenlos und ohne Anmeldung, von ${Brand.NAME}.\n\n${Updates.DOWNLOAD_URL}")
+            runOnUiThread {
+                try {
+                    startActivity(Intent.createChooser(send, "App empfehlen"))
                 } catch (e: ActivityNotFoundException) {
                     // Dieses Gerät hat keine App, die Text annimmt.
                 }
@@ -597,7 +655,53 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun downloadUpdate() {
-            runOnUiThread { openExternal(Updates.DOWNLOAD_URL) }
+            if (Updates.ENABLED) runOnUiThread { openExternal(Updates.DOWNLOAD_URL) }
+        }
+
+        /** Impressum oder Datenschutzerklärung, so wie sie in der App liegen (Markdown), siehe [Legal]. */
+        @JavascriptInterface
+        fun legal(name: String): String = Legal.text(applicationContext, name)
+
+        /** Die Seite sagt, ob die Seite zum Verbinden des eigenen Radars offen ist, siehe [offerCopied]. */
+        @JavascriptInterface
+        fun setupOpen(open: Boolean) {
+            runOnUiThread {
+                clipWanted = open
+                if (open) offerCopied()
+            }
+        }
+
+        /** Die Seite sagt, ob sie gerade etwas zum Zurückgehen hat, siehe [armBack]. */
+        @JavascriptInterface
+        fun backArmed(armed: Boolean) {
+            runOnUiThread { armBack(armed && pageReady) }
+        }
+
+        /** Öffnet das Telefon mit der Nummer des Anbieters. Gewählt wird erst, wenn der Mensch dort bestätigt. */
+        @JavascriptInterface
+        fun callCompany() {
+            runOnUiThread { openIntent(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Brand.PHONE_DIAL))) }
+        }
+
+        /**
+         * Öffnet das E-Mail-Programm mit der Adresse des Anbieters. [about] sagt, worum es geht ("usv" für die
+         * Beratung zur Stromversorgung), und steht dann im Betreff. Abgeschickt wird nichts von selbst.
+         */
+        @JavascriptInterface
+        fun mailCompany(about: String) {
+            if (Brand.MAIL.isEmpty()) return
+            val subject = if (about == "usv") "Anfrage USV-Beratung (über die App Blackout-Radar)" else "Anfrage über die App Blackout-Radar"
+            runOnUiThread {
+                openIntent(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:" + Brand.MAIL)).putExtra(Intent.EXTRA_SUBJECT, subject))
+            }
+        }
+    }
+
+    private fun openIntent(intent: Intent) {
+        try {
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            // Dieses Gerät hat keine App dafür.
         }
     }
 
@@ -605,5 +709,22 @@ class MainActivity : Activity() {
         const val EXTRA_TAB = "tab"
         private const val REQUEST_NOTIFICATIONS = 1
         private const val BASE_URL = "https://blackout-radar.invalid/"
+    }
+}
+
+/**
+ * Die Anmeldung für die Zurück-Geste ab Android 13, siehe MainActivity.armBack. In einer eigenen Klasse,
+ * damit ältere Android-Fassungen die neuen Klassen gar nicht erst laden.
+ */
+@TargetApi(33)
+private class BackGesture(private val activity: Activity, onBack: () -> Unit) {
+    private val callback = OnBackInvokedCallback { onBack() }
+
+    init {
+        activity.onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback)
+    }
+
+    fun release() {
+        activity.onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback)
     }
 }

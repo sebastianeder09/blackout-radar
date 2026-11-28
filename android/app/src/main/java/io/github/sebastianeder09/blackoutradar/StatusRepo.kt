@@ -107,6 +107,15 @@ object MonitorWatch {
     fun shouldWarn(nowMs: Long, generatedAtMs: Long, lastWarnedMs: Long): Boolean =
         isStale(nowMs, generatedAtMs) && (lastWarnedMs <= 0 || nowMs - lastWarnedMs >= REPEAT_AFTER_MS)
 
+    /**
+     * Text der Warnung, dass der Radar stillsteht. Wer den öffentlichen Alarm nutzt, betreibt den Radar nicht
+     * selbst und muss nicht wissen, wo er läuft. Die Fassung aus dem Play Store nennt GitHub in keinem Fall.
+     */
+    fun staleText(ageMs: Long, public: Boolean, play: Boolean = BuildConfig.PLAY): String =
+        "Der letzte Lagebericht ist ${age(ageMs)} alt. " +
+            if (public || play) "Der Radar läuft vermutlich gerade nicht. Solange kommen auch keine Alarme."
+            else "Die Überwachung bei GitHub läuft vermutlich nicht, es kämen also auch keine Alarme."
+
     /** Alter in Worten, so wie der Radar Zeitspannen schreibt: "45 min", "3 h 20 min", "2 T 4 h". */
     fun age(ms: Long): String {
         val minutes = (ms / 60_000L).coerceAtLeast(0)

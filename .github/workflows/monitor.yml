@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       aktion:
-        description: "lauf = normaler Lauf, test-push = Testmeldung, planspiel = Blackout-Übung (16 Testmeldungen), diagnose = Datenquellen prüfen, takt = Taktgeber starten"
+        description: "lauf = normaler Lauf, test-push = Testmeldung, planspiel = Blackout-Übung (16 Testmeldungen), diagnose = Datenquellen prüfen, takt = Taktgeber starten, test-oeffentlich = Testmeldung an ALLE Handys mit der App"
         type: choice
         default: lauf
         options:
@@ -24,6 +24,7 @@ on:
           - planspiel
           - diagnose
           - takt
+          - test-oeffentlich
 
 permissions:
   contents: write   # Zustand in den Zweig "state" schreiben
@@ -50,6 +51,8 @@ jobs:
       NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
       NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
       NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+      ALARM_KEY: ${{ secrets.ALARM_KEY }}       # Schlüssel für den öffentlichen Alarm (unterschriebene Meldungen)
+      ALARM_TOKEN: ${{ secrets.ALARM_TOKEN }}   # optional: Zugriffstoken eines ntfy-Kontos für den öffentlichen Alarm
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
       SMTP_USER: ${{ secrets.SMTP_USER }}
@@ -121,6 +124,11 @@ jobs:
       - name: Testmeldung
         if: env.AKTION == 'test-push'
         run: python3 -m blackout_radar test-push
+
+      - name: Testmeldung an den öffentlichen Alarm
+        # Erreicht alle, die die App mit dem öffentlichen Alarm nutzen. Kommt als gewöhnliche Meldung, nicht als Alarm.
+        if: env.AKTION == 'test-oeffentlich'
+        run: python3 -m blackout_radar test-push --public
 
       - name: Planspiel
         if: env.AKTION == 'planspiel'

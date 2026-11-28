@@ -104,18 +104,28 @@ class Signal:
 
 @dataclass
 class Message:
-    """Eine Meldung an den Menschen. level: alarm | warn | info | ok | daily."""
+    """Eine Meldung an den Menschen. level: alarm | warn | info | ok | daily.
+
+    scope: "all" geht an alle Kanäle, auch an den öffentlichen Alarm. "operator" betrifft nur den Betrieb
+    des Radars (gestörte Quelle, Lücke, Test) und geht nur an die eigenen Kanäle des Betreibers.
+    """
 
     title: str
     body: str
     level: str = "info"
     key: str = ""
     url: str = ""
+    scope: str = "all"
+    # Zeitpunkt, zu dem die Meldung entstand. Setzt der Versand, gespeichert wird er im Postausgang.
+    created: datetime | None = field(default=None, compare=False, repr=False)
 
     def to_dict(self) -> dict:
-        return {"title": self.title, "body": self.body, "level": self.level, "key": self.key, "url": self.url}
+        data = {"title": self.title, "body": self.body, "level": self.level, "key": self.key, "url": self.url}
+        if self.scope != "all":
+            data["scope"] = self.scope
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> Message:
         return cls(data.get("title", ""), data.get("body", ""), data.get("level", "info"),
-                   data.get("key", ""), data.get("url", ""))
+                   data.get("key", ""), data.get("url", ""), data.get("scope") or "all")

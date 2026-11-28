@@ -10,12 +10,12 @@ from pathlib import Path
 from unittest import mock
 
 from blackout_radar import __main__ as app
-from blackout_radar import collectors, config, http, notify, report
+from blackout_radar import collectors, config, http, notify, report, sign
 from blackout_radar.engine import Engine
 from blackout_radar.http import HttpError
 from blackout_radar.model import iso
 
-from .helpers import at, frequency, make_cfg, media
+from .helpers import TEST_KEY, TEST_KEY_PUBLIC, at, frequency, make_cfg, media
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -212,7 +212,8 @@ class Upkeep(Harness):
         self.assertEqual([entry["title"] for entry in notices],
                          ["Stromausfall: Oberösterreich (laut Medien)", "Blackout-Radar ist aktiv: keine größeren Stromausfälle"])
         waiting, hello = notices
-        self.assertEqual(sorted(waiting), ["body", "delivered", "key", "level", "pending", "t", "title"])
+        self.assertEqual(sorted(waiting), ["body", "delivered", "key", "level", "pending", "scope", "t", "title"])
+        self.assertEqual((waiting["scope"], hello["scope"]), ("all", "operator"))  # die Begrüßung gilt dem Betreiber
         self.assertEqual((waiting["level"], waiting["t"], waiting["delivered"], waiting["pending"]),
                          ("warn", iso(at(5)), [], ["ntfy"]))
         self.assertIn("Dauer und Ende lassen sich aus Medienberichten nicht ablesen.", waiting["body"])
@@ -241,6 +242,118 @@ class Upkeep(Harness):
         snapshot = report.Report(self.cfg, self.state, at(5)).snapshot()
         self.assertEqual(snapshot["active"][0]["areas"][0]["area"], "AT-4")
         json.dumps(snapshot)
+
+
+class PublicChannel(Harness):
+    """Der öffentliche Alarm im ganzen Ablauf: was hinausgeht und was der Lagebericht dazu sagt."""
+
+    OUTAGE = "Stromausfall: Oberösterreich (laut Medien)"
+
+    def setUp(self):
+        super().setUp()
+        self.public = []  # was an den öffentlichen Alarm ging
+        keys = mock.patch.dict(sign.PUBLIC_KEYS, {"test": TEST_KEY_PUBLIC})
+        senders = mock.patch.dict(notify.SENDERS, {"public": lambda cfg, message: self.public.append(message)})
+        keys.start()
+        senders.start()
+        self.addCleanup(keys.stop)
+        self.addCleanup(senders.stop)
+        self.cfg = self.config(ALARM_KEY=TEST_KEY)
+        self.state = {}
+
+    @staticmethod
+    def config(**env):
+        cfg = make_cfg(NTFY_TOPIC="thema", **env)
+        for name in ("frequency", "load", "utility"):
+            cfg["sources"][name]["enabled"] = False
+        return cfg
+
+    def tick(self, minute):
+        return app.tick(self.cfg, self.state, at(minute))
+
+    def outage(self):
+        return [media("AT-4", 0.026, at(0), at(5), text="1 Medium berichtet, rund 40.000 Betroffene laut Schlagzeilen")]
+
+    def test_outages_and_daily_summary_go_public_operation_does_not(self):
+        self.tick(0)                 # Begrüßung: nur für den Betreiber
+        self.signals = self.outage()
+        self.tick(5)                 # Ausfall: für alle
+        self.signals = []
+        self.tick(200)               # Lücke in der Überwachung: nur für den Betreiber
+        self.tick(60 * 19 + 5)       # 27.11. 07:05 Uhr: tägliche Übersicht, für alle
+        private, public = self.titles(), [message.title for message in self.public]
+        self.assertIn("Blackout-Radar ist aktiv: keine größeren Stromausfälle", private)
+        self.assertTrue(any(title.startswith("Überwachung war unterbrochen") for title in private))
+        self.assertEqual(public[0], self.OUTAGE)
+        self.assertTrue(public[-1].startswith("Lagebericht 27.11."))
+        self.assertFalse([title for title in public if "Blackout-Radar" in title or "Überwachung" in title])
+        self.assertEqual([title for title in private if title in public], public)  # der Betreiber bekommt alles
+
+    def test_status_file_names_the_public_alarm(self):
+        self.tick(0)
+        self.signals = self.outage()
+        self.tick(5)
+        current = report.Report(self.cfg, self.state, at(5))
+        snapshot, text = current.snapshot(), current.markdown()
+        self.assertEqual(snapshot["public"], {"enabled": True, "server": "https://ntfy.sh",
+                                              "topic": "blackout-radar-alarm", "key": "test"})
+        outage, hello = snapshot["notices"]
+        self.assertEqual((outage["scope"], outage["delivered"], outage["pending"]), ("all", ["ntfy", "public"], []))
+        self.assertEqual((hello["scope"], hello["delivered"], hello["pending"]), ("operator", ["ntfy"], []))
+        self.assertIn(f"| 12:05 | {self.OUTAGE} | ntfy, öffentlicher Alarm |", text)
+        self.assertIn("Öffentlicher Alarm: eingeschaltet. Unterschriebene Meldungen gehen an das Thema "
+                      "`blackout-radar-alarm` bei ntfy.sh.", text)
+        self.assertNotIn(TEST_KEY.split(":")[2], json.dumps(snapshot) + text)
+
+    def test_public_failure_shows_up_as_pending(self):
+        # Die App holt über den Lagebericht nach, was der öffentliche Alarm nicht zugestellt hat.
+        def refuse(cfg, message):
+            raise notify.DeliveryError("öffentlicher Alarm: HTTP 429 von ntfy.sh")
+
+        self.tick(0)
+        self.signals = self.outage()
+        with mock.patch.dict(notify.SENDERS, {"public": refuse}):
+            self.tick(5)
+        notice = report.Report(self.cfg, self.state, at(5)).snapshot()["notices"][0]
+        self.assertEqual((notice["title"], notice["delivered"], notice["pending"]), (self.OUTAGE, ["ntfy"], ["public"]))
+        self.tick(10)
+        notice = report.Report(self.cfg, self.state, at(10)).snapshot()["notices"][0]
+        self.assertEqual((notice["delivered"], notice["pending"]), (["ntfy", "public"], []))
+        self.assertEqual([message.title for message in self.public], [self.OUTAGE])
+
+    def test_wrong_key_switches_the_channel_off_and_says_so(self):
+        self.cfg = self.config(ALARM_KEY=sign.generate("k1").export())
+        self.tick(0)
+        self.signals = self.outage()
+        self.tick(5)
+        self.assertEqual(self.public, [])
+        current = report.Report(self.cfg, self.state, at(5))
+        snapshot = current.snapshot()
+        self.assertEqual(snapshot["public"], {"enabled": False, "server": "https://ntfy.sh",
+                                              "topic": "blackout-radar-alarm", "key": None,
+                                              "problem": "ALARM_KEY passt nicht zum Schlüssel „k1“, den die App kennt"})
+        self.assertEqual(snapshot["notices"][0]["delivered"], ["ntfy"])
+        self.assertIn("Öffentlicher Alarm: **nicht in Betrieb**. ALARM_KEY passt nicht", current.markdown())
+
+    def test_without_key_everything_stays_as_before(self):
+        self.cfg = self.config()
+        self.tick(0)
+        current = report.Report(self.cfg, self.state, at(0))
+        self.assertEqual(current.snapshot()["public"], {"enabled": False, "server": "https://ntfy.sh",
+                                                        "topic": "blackout-radar-alarm", "key": None})
+        self.assertNotIn("Öffentlicher Alarm", current.markdown())
+        self.assertEqual(self.public, [])
+
+    def test_public_channel_alone_still_gets_the_daily_summary(self):
+        cfg = make_cfg(ALARM_KEY=TEST_KEY)
+        for name in ("frequency", "load", "utility"):
+            cfg["sources"][name]["enabled"] = False
+        cfg["health"]["gap_minutes"] = 10_000
+        state = {}
+        app.tick(cfg, state, at(0))
+        app.tick(cfg, state, at(60 * 19 + 5))
+        self.assertEqual([message.title for message in self.public],
+                         ["Lagebericht 27.11.: keine größeren Stromausfälle"])
 
 
 class CommandLine(Harness):
@@ -316,6 +429,36 @@ class CommandLine(Harness):
         self.assertEqual(code, 1)
         self.assertIn("Kein Kanal eingerichtet", out)
 
+    def test_public_test_needs_an_explicit_wish(self):
+        public = []
+        with mock.patch.dict(sign.PUBLIC_KEYS, {"test": TEST_KEY_PUBLIC}), \
+                mock.patch.dict(os.environ, {"ALARM_KEY": TEST_KEY}), \
+                mock.patch.dict(notify.SENDERS, {"public": lambda cfg, message: public.append(message)}), \
+                mock.patch.object(app.time, "sleep"):
+            self.assertEqual(self.run_cli("test-push", "--level", "alarm")[1].strip(), "ntfy: ok")
+            self.assertEqual(self.run_cli("simulate", "--send")[0], 0)
+            with mock.patch.object(Engine, "tick", side_effect=RuntimeError("kaputt")):
+                self.assertEqual(self.run_cli("run", "--state", str(self.state_path))[0], 1)
+            self.assertIn("Blackout-Radar: Fehler im Programm", self.titles())
+            self.assertEqual(public, [])  # Test, Planspiel und Abbruch bleiben beim Betreiber
+            count = len(self.pushed)
+            code, out = self.run_cli("test-push", "--public")
+            self.assertEqual((code, out.strip()), (0, "öffentlicher Alarm: ok"))
+            self.assertEqual((len(public), len(self.pushed)), (1, count))
+            self.assertEqual((public[0].level, public[0].scope), ("info", "all"))
+            self.assertIn("nur ein Test", public[0].body)
+        code, out = self.run_cli("test-push", "--public")
+        self.assertEqual(code, 1)
+        self.assertIn("Der öffentliche Alarm ist nicht in Betrieb. Das Secret ALARM_KEY fehlt.", out)
+
+    def test_new_key_pair(self):
+        code, out = self.run_cli("key", "--name", "k2")
+        self.assertEqual(code, 0)
+        secret = out.split("BRKEY1:k2:")[1].split()[0]
+        key = sign.parse_key("BRKEY1:k2:" + secret)
+        self.assertIn(f'"k2": "{key.public_hex}"', out)
+        self.assertEqual(self.run_cli("key", "--name", "Zu Lang!")[0], 1)
+
     def test_simulation_prints_the_course_of_a_blackout(self):
         code, out = self.run_cli("simulate")
         self.assertEqual(code, 0)
@@ -372,6 +515,7 @@ class Configuration(unittest.TestCase):
         self.assertEqual(cfg["priority"]["always_areas"], ["AT-4"])
         self.assertFalse(cfg["notify"]["ntfy"]["enabled"])
         self.assertFalse(cfg["notify"]["email"]["enabled"])
+        self.assertFalse(cfg["notify"]["public"]["enabled"])
         self.assertFalse(cfg["sources"]["ioda"]["enabled"])
 
     def test_secrets_come_from_the_environment(self):

@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import tomllib
 from pathlib import Path
+
+from . import sign
 
 DEFAULTS: dict = {
     "timezone": "Europe/Vienna",
@@ -43,6 +46,12 @@ DEFAULTS: dict = {
         "ntfy": {"enabled": True, "server": "https://ntfy.sh", "topic": "", "token": "", "skip_levels": []},
         "email": {"enabled": False, "host": "", "port": 587, "user": "", "password": "",
                   "sender": "", "recipient": "", "skip_levels": ["daily"]},
+        # Öffentlicher Alarm: ein festes, öffentliches Thema für alle, die die App installieren. Jede Meldung
+        # dorthin ist unterschrieben (sign.py). Schaltet sich ein, sobald das Secret ALARM_KEY gesetzt ist und
+        # zum Schlüssel in der App passt. Das Thema steht fest in der App: Wer es hier ändert, muss auch die
+        # App ändern.
+        "public": {"enabled": True, "server": "https://ntfy.sh", "topic": "blackout-radar-alarm",
+                   "token": "", "key": "", "skip_levels": []},
     },
     "sources": {
         "frequency": {
@@ -162,6 +171,8 @@ ENV_MAP = {
     "NTFY_TOPIC": ("notify", "ntfy", "topic"),
     "NTFY_SERVER": ("notify", "ntfy", "server"),
     "NTFY_TOKEN": ("notify", "ntfy", "token"),
+    "ALARM_KEY": ("notify", "public", "key"),
+    "ALARM_TOKEN": ("notify", "public", "token"),
     "SMTP_HOST": ("notify", "email", "host"),
     "SMTP_PORT": ("notify", "email", "port"),
     "SMTP_USER": ("notify", "email", "user"),
@@ -180,6 +191,21 @@ def _merge(base: dict, extra: dict) -> dict:
         else:
             base[key] = value
     return base
+
+
+def public_problem(public: dict) -> str:
+    """Prüft die Angaben zum öffentlichen Alarm. Liefert den Grund, warum er nicht laufen kann, oder ''."""
+    if not re.fullmatch(r"[-_A-Za-z0-9]{1,64}", str(public.get("topic") or "")):
+        return "Das öffentliche Thema fehlt oder enthält unerlaubte Zeichen"
+    try:
+        key = sign.parse_key(public.get("key") or "")
+    except sign.BadKey as err:
+        return str(err)
+    if sign.PUBLIC_KEYS.get(key.kid) != key.public_hex:
+        # Mit einem fremden Schlüssel würde jede App jede Meldung verwerfen. Dann lieber gar nicht senden:
+        # Die App holt die Meldungen in diesem Fall über den Lagebericht nach.
+        return f"ALARM_KEY passt nicht zum Schlüssel „{key.kid}“, den die App kennt"
+    return ""
 
 
 def load(path: str | os.PathLike | None = None, env: dict | None = None) -> dict:
@@ -208,5 +234,8 @@ def load(path: str | os.PathLike | None = None, env: dict | None = None) -> dict
     mail["enabled"] = bool(mail["host"] and mail["recipient"])
     if not mail["sender"]:
         mail["sender"] = mail["user"] or mail["recipient"]
+    public = notify["public"]
+    public["problem"] = public_problem(public) if public["key"] else ""
+    public["enabled"] = bool(public["enabled"] and public["key"] and not public["problem"])
     cfg["sources"]["cloudflare"]["enabled"] = bool(cfg["sources"]["cloudflare"]["token"])
     return cfg

@@ -227,6 +227,19 @@ reports() {  # Paket Datei: Fehlerberichte von Android zu Abstürzen und Hänger
 
 service_running() { adb shell dumpsys activity services "$1/$PKG.ListenerService" 2> /dev/null | grep -q "ServiceRecord"; }  # Paket: läuft der Dienst dieser App?
 
+wait_service() {  # Paket Sekunden -> Wartezeit in Sekunden, sobald der Dienst dieser App läuft
+  local start
+  start=$(date +%s)
+  while [ $(($(date +%s) - start)) -lt "$2" ]; do
+    if service_running "$1"; then
+      echo $(($(date +%s) - start))
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 wait_restart() {  # Paket Bisheriger-Prozess Sekunden -> Wartezeit in Sekunden, sobald die App in einem neuen Prozess ihren Dienst hält
   local start pid
   start=$(date +%s)
@@ -646,11 +659,22 @@ else
 fi
 
 # Neustart des Handys
+# Android sagt den Apps der Reihe nach, dass das Handy hochgefahren ist (BOOT_COMPLETED), erst darauf startet die App
+# ihren Dienst. Wann sie an der Reihe ist, bestimmt Android: Im Lauf 19 lief der Dienst auf einem langsamen Emulator
+# mit Android 16 noch nicht, als der Test 25 s nach dem Hochfahren ein einziges Mal nachsah, und 7 s später war die
+# Meldung da. Der Test wartet deshalb bis zu 2 Minuten und hält fest, wie lange es dauerte und was Android dazu ins
+# Systemprotokoll schrieb.
 note_exits enden-vor-neustart.txt
+mark=$(adb shell "date '+%m-%d %H:%M:%S.000'" | tr -d '\r')
 adb reboot
 if wait_boot; then
-  sleep 25
-  service_running "$PKG" && ok "Dienst nach dem Neustart von selbst wieder gestartet" || bad "Dienst nach dem Neustart nicht gestartet"
+  if t=$(wait_service "$PKG" 120); then
+    ok "Dienst nach dem Neustart von selbst wieder gestartet, $t s nach dem Hochfahren"
+  else
+    bad "Dienst 120 s nach dem Neustart nicht gestartet"
+  fi
+  log "Android zum Neustart: $(system_says "$PKG" "$mark" | grep -vE 'START u0|Displayed ' | head -4 | tr '\n' '|')"
+  [ "${t:-25}" -lt 25 ] && sleep $((25 - t))  # wie bisher: Android nach dem Hochfahren Zeit lassen, bevor der Test weitermacht
   publish "CI Nach Neustart" 4 warning "Diese Meldung kam nach einem Neustart des Handys."
   if t=$(wait_notification "CI Nach Neustart" 180); then ok "Nach dem Neustart Meldung nach $t s"; else bad "Nach dem Neustart keine Meldung"; fi
 else

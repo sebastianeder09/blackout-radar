@@ -6,7 +6,7 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
-from . import areas, reach
+from . import areas, reach, sign
 from .collectors import frequency
 from .engine import Engine
 from .model import Message, fmt_duration, fmt_pct, iso, parse_ts
@@ -24,7 +24,7 @@ SOURCE_NAMES = {
 }
 SOURCE_SHORT = {"frequency": "Netzfrequenz", "load": "Stromlast", "ioda": "IODA",
                 "cloudflare": "Cloudflare", "utility": "LINZ NETZ", "news": "Medien"}
-CHANNEL_NAMES = {"ntfy": "ntfy", "email": "E-Mail"}
+CHANNEL_NAMES = {"ntfy": "ntfy", "email": "E-Mail", "public": "öffentlicher Alarm"}
 WEEKDAYS = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
 WINDOWS = ((1, "24 Stunden"), (7, "7 Tage"), (30, "30 Tage"), (90, "90 Tage"))
 
@@ -184,6 +184,7 @@ class Report:
         """Die letzten Meldungen mit Text und Dringlichkeit, neueste zuerst.
 
         Für die App: Sie vergleicht die Liste mit dem, was als Push ankam, und holt nach, was fehlt.
+        scope sagt, für wen die Meldung gedacht ist: "all" für alle, "operator" nur für den Betreiber.
         """
         hidden = secrets(self.cfg["notify"])
         rows = []
@@ -191,15 +192,39 @@ class Report:
             message = item["message"]
             rows.append({"key": message.get("key"), "t": item.get("queued_at"), "title": message["title"],
                          "body": message.get("body", ""), "level": message.get("level"),
-                         "delivered": list(item.get("done") or []), "pending": list(item.get("pending") or [])})
+                         "scope": message.get("scope") or "all",
+                         "delivered": list(item.get("done") or []),
+                         "pending": list(item.get("pending") or []) + list(item.get("lost") or [])})
         for entry in self.state.get("sent") or []:
             rows.append({"key": entry.get("key"), "t": entry.get("t"), "title": entry["title"],
                          "body": entry.get("body", ""), "level": entry.get("level"),
+                         "scope": entry.get("scope") or "all",
                          "delivered": list(entry.get("channels") or []), "pending": list(entry.get("failed") or [])})
         for row in rows:  # Zugangsdaten stehen in keiner Meldung, die Datei ist aber öffentlich
             row["title"], row["body"] = scrub(row["title"], hidden), scrub(row["body"], hidden)
         rows.sort(key=lambda row: row["t"] or "", reverse=True)
         return rows[:limit]
+
+    def public(self) -> dict:
+        """Der öffentliche Alarm: wohin der Radar die unterschriebenen Meldungen schickt."""
+        cfg = self.cfg["notify"].get("public") or {}
+        row = {"enabled": bool(cfg.get("enabled")), "server": cfg.get("server") or "", "topic": cfg.get("topic") or "",
+               "key": None}
+        if cfg.get("enabled"):
+            row["key"] = sign.parse_key(cfg["key"]).kid
+        if cfg.get("problem"):
+            row["problem"] = scrub(cfg["problem"], secrets(self.cfg["notify"]))
+        return row
+
+    def public_line(self) -> str | None:
+        """Eine Zeile für den Lagebericht. None, solange der öffentliche Alarm nicht eingerichtet ist."""
+        row = self.public()
+        if row["enabled"]:
+            return (f"Öffentlicher Alarm: eingeschaltet. Unterschriebene Meldungen gehen an das Thema "
+                    f"`{row['topic']}` bei {row['server'].split('://')[-1]}.")
+        if row.get("problem"):
+            return f"Öffentlicher Alarm: **nicht in Betrieb**. {md(row['problem'])}."
+        return None
 
     # ---------------------------------------------------------------- Markdown
     def event_block(self, event) -> list[str]:
@@ -312,6 +337,9 @@ class Report:
                 channels = ", ".join(CHANNEL_NAMES.get(c, c) for c in entry.get("channels") or []) or "nicht zugestellt"
                 lines.append(f"| {self.clock(parse_ts(entry['t']))} | {md(entry['title'])} | {channels} |")
             lines.append("")
+        public = self.public_line()
+        if public:
+            lines += [public, ""]
         lines += [BACKGROUND, CREDITS, ""]
         return "\n".join(lines)
 
@@ -341,7 +369,7 @@ class Report:
             "watching": [brief(e) for e in watching],
             "figures": [{"label": label, "value": value} for label, value in self.figures()],
             "statistics": self.statistics(), "history": self.history()[:50], "sources": self.sources(),
-            "europe": self.europe(), "notices": self.notices(),
+            "europe": self.europe(), "notices": self.notices(), "public": self.public(),
         }
 
     # ---------------------------------------------------- tägliche Zusammenfassung
@@ -393,7 +421,9 @@ class Report:
             pause = fmt_duration(timedelta(seconds=book.get("max_gap_s") or 0))
             lines.append(f"Überwachung: {book['runs']} Läufe seit dem letzten Lagebericht, längste Pause {pause}.")
         key = f"{'hello' if first else 'daily'}:{now.astimezone(self.tz).date().isoformat()}"
-        return Message(title, "\n".join(lines), "daily" if not first else "info", key, self.cfg.get("status_url", ""))
+        # Die erste Meldung begrüßt den Betreiber. Die tägliche Übersicht geht an alle, als Lebenszeichen.
+        return Message(title, "\n".join(lines), "daily" if not first else "info", key, self.cfg.get("status_url", ""),
+                       scope="operator" if first else "all")
 
 
 def write(out_dir, cfg: dict, state: dict, now) -> None:

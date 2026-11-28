@@ -105,4 +105,4 @@ def render(cfg: dict, start, tz) -> str:
 
 def as_test(message: Message) -> Message:
     return Message("[TEST] " + message.title, "Planspiel, kein echter Ausfall.\n" + message.body,
-                   message.level, "test:" + message.key, message.url)
+                   message.level, "test:" + message.key, message.url, scope="operator")

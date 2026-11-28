@@ -1,26 +1,27 @@
 """Diagnose: fragt jede Datenquelle einmal roh ab und zeigt, was zurückkommt.
 
-Aufruf:  python -m blackout_radar probe [--only load,frequency,news,feeds,utility,ntfy]
+Aufruf:  python -m blackout_radar probe [--only load,frequency,news,feeds,utility,ntfy,public]
          python -m blackout_radar probe --only replay   Lastauswertung an echten Tagen nachspielen
          python -m blackout_radar probe --only ioda     IODA (antwortet automatischen Abfragen bisher nicht)
 
 Gedacht zum Einrichten und für den Fall, dass eine Quelle ihr Format ändert.
-Es werden nur die festen Adressen der Datenquellen abgefragt, nichts wird gespeichert
-oder verschickt.
+Es werden nur die festen Adressen der Datenquellen abgefragt, nichts wird gespeichert. Verschickt
+wird nur bei "public": Probemeldungen an ein zufälliges Wegwerf-Thema bei ntfy, das niemand liest.
 """
 from __future__ import annotations
 
 import json
 import re
+import secrets
 import time
 import traceback
 import xml.etree.ElementTree as ET
 from datetime import timedelta
 
-from . import areas, http
+from . import areas, http, notify, sign
 from .collectors import energy_charts, linznetz, news
 from .http import HttpError
-from .model import fmt_number, iso, parse_ts
+from .model import Message, fmt_number, iso, parse_ts
 
 
 def outline(value, depth: int = 0, limit: int = 4) -> str:
@@ -396,6 +397,121 @@ def probe_ntfy(cfg: dict, now) -> None:
         print("  Antwort:", text[:200])
 
 
+# ------------------------------------------------------- öffentlicher Alarm
+def _poll(server: str, topic: str, since: str) -> list[dict] | None:
+    """Holt die Nachrichten eines Themas. ntfy liefert je Zeile ein JSON-Objekt."""
+    text = _fetch(f"{server}/{topic}/json", {"poll": "1", "since": since}, timeout=20)
+    if text is None:
+        return None
+    rows = []
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("event") == "message":
+            rows.append(row)
+    return rows
+
+
+def _unseal(keys: dict, topic: str, row: dict) -> dict | None:
+    return sign.unseal(keys, topic, row.get("title") or "", row.get("message") or "", row.get("click") or "")
+
+
+def probe_samples(now) -> list[Message]:
+    """Probemeldungen, die alles enthalten, woran die Unterschrift unterwegs scheitern könnte."""
+    url = "https://example.org/lage?x=1&y=2"
+    long_text = "\n".join(f"Zeile {index}: Größe, Länge, Übergang, Maß und Straße. 😀" for index in range(120))
+    samples = [
+        Message("Blackout: Österreich", "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n"
+                "» „Ganz Österreich ohne Strom“ (orf.at)", "alarm", "probe:1", url),
+        Message("  Titel mit =?utf-8?q?Code?= und\tTabulator  ", "\n\n  Leerraum vorn und hinten \t\n\n"
+                "Leerzeile davor.\r\nZeilenende wie unter Windows.   \n", "warn", "probe:2", url),
+        Message("Update Österreich: dauert an, bisher 2 h 10 min",
+                "Verspätet zugestellt, erstellt am 26.11. 12:00 Uhr.\n" + long_text, "info", "probe:3", ""),
+        Message("Отключение электроэнергии · 大規模停電 · انقطاع الكهرباء",
+                "» Массовое отключение (example.ru)\n» 全国で停電 (example.jp)\n» انقطاع واسع (example.sa)",
+                "info", "probe:4", url),
+        Message("Lagebericht 26.11.: keine größeren Stromausfälle", "", "daily", "probe:5", url),
+    ]
+    for sample in samples:
+        sample.created = now
+    return samples
+
+
+def probe_public(cfg: dict, now) -> None:
+    public = cfg["notify"]["public"]
+    server, topic = public["server"].rstrip("/"), public["topic"]
+    if public["enabled"]:
+        kid = sign.parse_key(public["key"]).kid
+        print(f"  Eingerichtet: ALARM_KEY passt zum Schlüssel „{kid}“ der App. Thema {topic} bei {server}.")
+    elif public.get("problem"):
+        print(f"  FEHLER: {public['problem']}")
+    else:
+        print(f"  Nicht eingerichtet: Das Secret ALARM_KEY fehlt. Vorgesehen ist das Thema {topic} bei {server}.")
+
+    print("  -- Was liegt im öffentlichen Thema (letzte 12 Stunden)?")
+    rows = _poll(server, topic, "12h")
+    if rows is None:
+        print("  Das Thema ließ sich nicht lesen. HTTP 403 hieße: Jemand hat es für sich reserviert.")
+    else:
+        checked = [(row, _unseal(sign.PUBLIC_KEYS, topic, row)) for row in rows]
+        valid = sum(1 for _, fields in checked if fields)
+        print(f"  {len(rows)} Nachrichten, {valid} mit gültiger Unterschrift, {len(rows) - valid} fremde oder ungültige")
+        for row, fields in checked[-8:]:
+            stamp = iso(parse_ts(row.get("time")))
+            mark = f"gültig ({fields['l']})" if fields else "OHNE gültige Unterschrift"
+            print(f"    {stamp}  {mark}  {str(row.get('title') or '')[:70]!r}")
+
+    print("  -- Gegenprobe: unterschriebene Meldungen an ein Wegwerf-Thema schicken, zurückholen und prüfen")
+    key = sign.generate("probe")
+    trial = "br-probe-" + secrets.token_hex(8)
+    target = {"server": server, "topic": trial, "key": key.export(), "token": public.get("token") or ""}
+    sent, problems = {}, []
+    for sample in probe_samples(now):
+        try:
+            sent[sample.key] = notify.public_payload(target, sample)
+            notify.send_public(target, sample)
+        except notify.DeliveryError as err:
+            problems.append(f"{sample.key}: {err}")
+    back = None
+    for wait in (2, 6):
+        time.sleep(wait)
+        back = _poll(server, trial, "all")
+        if back is not None and len(back) >= len(sent):
+            break
+    received = {}
+    for row in back or []:
+        fields = _unseal({"probe": key.public_hex}, trial, row)
+        if fields:
+            received[fields["i"]] = (row, fields)
+        else:
+            problems.append(f"Nachricht {str(row.get('title') or '')[:40]!r} kam an, aber die Unterschrift gilt nicht")
+            for name in ("title", "message", "click"):
+                match = [payload for payload in sent.values() if payload.get("title") == row.get("title")]
+                want = match[0].get(name, "") if match else None
+                if want is not None and want != (row.get(name) or ""):
+                    print(f"    Feld {name} geschickt: {want[:300]!r}")
+                    print(f"    Feld {name} erhalten:  {str(row.get(name) or '')[:300]!r}")
+    for ident, payload in sent.items():
+        if ident not in received:
+            problems.append(f"{ident}: nicht zurückbekommen")
+            continue
+        row, fields = received[ident]
+        size = len((row.get("message") or "").encode("utf-8"))
+        print(f"    {ident}: gültig, Dringlichkeit {fields['l']}, {size} Bytes, Zeit {fields['t']}, "
+              f"von ntfy datiert {row.get('time')}")
+        if fields["t"] != int(now.timestamp()) or "attachment" in row:
+            problems.append(f"{ident}: Zeit oder Form stimmt nicht ({json.dumps(row, ensure_ascii=False)[:200]})")
+    if problems or not sent:
+        print("  GEGENPROBE FEHLGESCHLAGEN:")
+        for problem in problems or ["nichts verschickt"]:
+            print(f"    {problem}")
+    else:
+        print(f"  GEGENPROBE BESTANDEN: {len(sent)} von {len(sent)} Meldungen kamen unverändert zurück, "
+              "jede Unterschrift gilt.")
+
+
 PROBES = {
     "load": ("Stromlast (Energy-Charts)", probe_load),
     "frequency": ("Netzfrequenz", probe_frequency),
@@ -403,6 +519,7 @@ PROBES = {
     "feeds": ("Medien (Feeds aus Übersee)", probe_feeds),
     "utility": ("Störmeldungen LINZ NETZ", probe_utility),
     "ntfy": ("Push-Dienst ntfy", probe_ntfy),
+    "public": ("Öffentlicher Alarm (unterschriebene Meldungen)", probe_public),
 }
 
 

@@ -41,6 +41,14 @@
 [notify.email]
 # skip_levels = ["daily"]         # per E-Mail kommt die tägliche Übersicht standardmäßig nicht
 
+[notify.public]
+# Öffentlicher Alarm für alle, die die App installieren. Schaltet sich ein, sobald das Secret ALARM_KEY
+# gesetzt ist. Thema und Server stehen fest in der App: Wer sie hier ändert, muss auch die App ändern.
+# enabled = true
+# server = "https://ntfy.sh"
+# topic = "blackout-radar-alarm"
+# skip_levels = []                # z. B. ["daily"]: Die tägliche Übersicht geht dann nicht an alle
+
 [sources.frequency]
 # alarm_mhz = 200                 # Alarm ab dieser Abweichung von 50 Hz
 # clear_mhz = 100

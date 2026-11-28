@@ -3,10 +3,11 @@
   python -m blackout_radar run         ein Lauf: Quellen abfragen, melden, Lagebericht schreiben
   python -m blackout_radar daemon      Dauerbetrieb auf einem eigenen Rechner
   python -m blackout_radar status      Lagebericht aus dem gespeicherten Zustand anzeigen
-  python -m blackout_radar test-push   Testmeldung an alle eingerichteten Kanäle
+  python -m blackout_radar test-push   Testmeldung an die eigenen Kanäle (--public: an den öffentlichen Alarm)
   python -m blackout_radar simulate    Planspiel: Blackout in Österreich im Zeitraffer
   python -m blackout_radar probe       Diagnose: jede Datenquelle einmal roh abfragen
   python -m blackout_radar takt        Taktgeber in GitHub Actions: ein Glied der Kette (siehe takt.py)
+  python -m blackout_radar key         neues Schlüsselpaar für den öffentlichen Alarm erzeugen
 """
 from __future__ import annotations
 
@@ -19,12 +20,13 @@ import time
 from datetime import timedelta
 from pathlib import Path
 
-from . import collectors, config, http, probe, reach, report, simulate, takt
+from . import collectors, config, http, probe, reach, report, sign, simulate, takt
 from .engine import Engine
 from .model import Message, fmt_duration, iso, now_utc, parse_ts, zone
-from .notify import Notifier, scrub, secrets
+from .notify import PUBLIC, Notifier, scrub, secrets
 
 log = logging.getLogger("blackout_radar")
+OPERATOR = "operator"  # Meldungen über den Betrieb: nur an den Betreiber, nie an den öffentlichen Alarm
 
 
 # ------------------------------------------------------------------- Zustand
@@ -83,10 +85,11 @@ def upkeep(cfg: dict, state: dict, now, notice: str | None = None) -> list[Messa
             messages.append(Message(
                 f"Überwachung war unterbrochen: {fmt_duration(gap)} ohne Lauf",
                 f"Zwischen {clock(last_run)} und {clock(now)} Uhr wurde nichts geprüft. Ausfälle aus dieser Zeit "
-                "können fehlen. Die Überwachung läuft wieder.", "info", f"gap:{iso(last_run)}", url))
+                "können fehlen. Die Überwachung läuft wieder.", "info", f"gap:{iso(last_run)}", url, OPERATOR))
     book["runs"] = (book.get("runs") or 0) + 1
     if notice:
-        messages.append(Message("Blackout-Radar: Zustand neu begonnen", notice, "info", f"reset:{iso(now)}", url))
+        messages.append(Message("Blackout-Radar: Zustand neu begonnen", notice, "info", f"reset:{iso(now)}", url,
+                                OPERATOR))
 
     silent = reach.silent_since(state) is not None
     for name, entry in (state.get("sources") or {}).items():
@@ -107,15 +110,16 @@ def upkeep(cfg: dict, state: dict, now, notice: str | None = None) -> list[Messa
                 title = f"Datenquelle gestört: {label}"
                 body = (f"Seit {clock(failing)} Uhr liefert diese Quelle keine Daten ({error}). "
                         "Die übrigen Quellen laufen weiter.")
-            messages.append(Message(title, body, "info", f"source-down:{name}:{entry['fail_since']}", url))
+            messages.append(Message(title, body, "info", f"source-down:{name}:{entry['fail_since']}", url,
+                                    OPERATOR))
         elif not failing and entry.get("alerted"):
             entry["alerted"] = False
             messages.append(Message(f"Datenquelle wieder in Ordnung: {label}", "Die Quelle liefert wieder Daten.",
-                                    "info", f"source-up:{name}:{iso(now)}", url))
+                                    "info", f"source-up:{name}:{iso(now)}", url, OPERATOR))
 
     local = now.astimezone(tz)
     today = local.date().isoformat()
-    reachable = any((cfg["notify"].get(channel) or {}).get("enabled") for channel in ("ntfy", "email"))
+    reachable = any((cfg["notify"].get(channel) or {}).get("enabled") for channel in ("ntfy", "email", "public"))
     if not state.get("welcomed"):
         if reachable:  # erste Meldung, sobald ein Kanal eingerichtet ist
             state["welcomed"] = iso(now)
@@ -167,7 +171,7 @@ def alert_crash(cfg: dict, folder: Path, now, err: Exception) -> None:
     text = scrub(f"{type(err).__name__}: {err}", secrets(cfg["notify"]))[:300]
     message = Message("Blackout-Radar: Fehler im Programm",
                       f"Ein Lauf ist abgebrochen ({text}). Solange der Fehler besteht, wird nicht überwacht.",
-                      "warn", f"crash:{today}", cfg.get("status_url", ""))
+                      "warn", f"crash:{today}", cfg.get("status_url", ""), OPERATOR)
     outcome = Notifier(cfg, {}).test(message)
     log.error("Abbruch gemeldet: %s", outcome or "kein Kanal eingerichtet")
     try:
@@ -184,6 +188,8 @@ def cmd_run(args) -> int:
     out_dir = Path(args.out) if args.out else state_path.parent
     state, notice = load_state(state_path)
     now = now_utc()
+    if cfg["notify"][PUBLIC].get("problem"):
+        log.warning("Öffentlicher Alarm nicht in Betrieb: %s", cfg["notify"][PUBLIC]["problem"])
     try:
         result = tick(cfg, state, now, deliver=not args.dry_run, notice=notice)
         if args.dry_run:
@@ -227,14 +233,28 @@ def cmd_status(args) -> int:
 def cmd_test_push(args) -> int:
     cfg = config.load(args.config)
     notifier = Notifier(cfg, {})
-    if not notifier.channels():
-        print("Kein Kanal eingerichtet. Für ntfy fehlt NTFY_TOPIC, für E-Mail fehlen SMTP_HOST und MAIL_TO.")
-        return 1
-    message = Message("Testmeldung vom Blackout-Radar",
-                      "Wenn du das liest, funktioniert der Versand.\n"
-                      "Echte Meldungen sehen genauso aus und führen per Antippen zum Lagebericht.",
-                      args.level, f"test:{iso(now_utc())}", cfg.get("status_url", ""))
-    outcome = notifier.test(message)
+    if args.public:
+        # Geht an alle, die die App mit dem öffentlichen Alarm nutzen. Deshalb nur auf ausdrücklichen Wunsch.
+        public = cfg["notify"][PUBLIC]
+        if not public["enabled"]:
+            reason = public["problem"] or "Das Secret ALARM_KEY fehlt."
+            print(f"Der öffentliche Alarm ist nicht in Betrieb. {reason}")
+            return 1
+        message = Message("Testmeldung vom Blackout-Radar",
+                          "Das ist nur ein Test, es gibt keinen Stromausfall.\n"
+                          "Der öffentliche Alarm funktioniert: Diese Meldung ist unterschrieben, "
+                          "und die App hat die Unterschrift geprüft.",
+                          args.level, f"test:{iso(now_utc())}", cfg.get("status_url", ""))
+        outcome = notifier.test(message, [PUBLIC])
+    else:
+        if not [name for name in notifier.channels() if name != PUBLIC]:
+            print("Kein Kanal eingerichtet. Für ntfy fehlt NTFY_TOPIC, für E-Mail fehlen SMTP_HOST und MAIL_TO.")
+            return 1
+        message = Message("Testmeldung vom Blackout-Radar",
+                          "Wenn du das liest, funktioniert der Versand.\n"
+                          "Echte Meldungen sehen genauso aus und führen per Antippen zum Lagebericht.",
+                          args.level, f"test:{iso(now_utc())}", cfg.get("status_url", ""), OPERATOR)
+        outcome = notifier.test(message)
     for channel, result in outcome.items():
         print(f"{report.CHANNEL_NAMES.get(channel, channel)}: {result}")
     return 0 if all(result == "ok" for result in outcome.values()) else 1
@@ -248,7 +268,7 @@ def cmd_simulate(args) -> int:
         print(simulate.render(cfg, start, tz))
         return 0
     notifier = Notifier(cfg, {})
-    if not notifier.channels():
+    if not [name for name in notifier.channels() if name != PUBLIC]:
         print("Kein Kanal eingerichtet, es wird nichts verschickt.")
         return 1
     failed = 0
@@ -268,6 +288,19 @@ def cmd_probe(args) -> int:
 
 def cmd_takt(args) -> int:
     return takt.run(check_only=args.pruefen)
+
+
+def cmd_key(args) -> int:
+    if not sign.KEY_FORMAT.fullmatch(f"BRKEY1:{args.name}:{'0' * 64}"):
+        print("Der Name darf nur aus Kleinbuchstaben und Ziffern bestehen, höchstens 8 Zeichen.")
+        return 1
+    key = sign.generate(args.name)
+    print("Neues Schlüsselpaar für den öffentlichen Alarm.\n")
+    print("Geheimer Teil. Nur als Secret ALARM_KEY bei GitHub eintragen, sonst nirgends aufbewahren:")
+    print(f"  {key.export()}\n")
+    print("Öffentlicher Teil. In blackout_radar/sign.py (PUBLIC_KEYS) und in der App eintragen:")
+    print(f'  "{key.kid}": "{key.public_hex}"')
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -292,8 +325,10 @@ def main(argv: list[str] | None = None) -> int:
 
     with_state("status", "Lagebericht aus dem gespeicherten Zustand anzeigen").set_defaults(func=cmd_status)
 
-    test = sub.add_parser("test-push", help="Testmeldung an alle eingerichteten Kanäle")
+    test = sub.add_parser("test-push", help="Testmeldung an die eigenen Kanäle")
     test.add_argument("--level", default="info", choices=["alarm", "warn", "info", "ok", "daily"])
+    test.add_argument("--public", action="store_true",
+                      help="stattdessen an den öffentlichen Alarm: Das erreicht alle, die die App nutzen")
     test.set_defaults(func=cmd_test_push)
 
     sim = sub.add_parser("simulate", help="Planspiel: Blackout in Österreich im Zeitraffer")
@@ -301,7 +336,8 @@ def main(argv: list[str] | None = None) -> int:
     sim.set_defaults(func=cmd_simulate)
 
     diag = sub.add_parser("probe", help="Diagnose: jede Datenquelle einmal roh abfragen")
-    diag.add_argument("--only", help="nur diese Quellen, mit Komma getrennt (load,frequency,news,feeds,utility,ntfy). "
+    diag.add_argument("--only", help="nur diese Quellen, mit Komma getrennt (load,frequency,news,feeds,utility,ntfy,"
+                                     "public). "
                                      "replay spielt die Lastauswertung an echten Tagen nach, ioda fragt IODA ab")
     diag.set_defaults(func=cmd_probe)
 
@@ -309,6 +345,10 @@ def main(argv: list[str] | None = None) -> int:
     clock.add_argument("--pruefen", action="store_true",
                        help="nur nachsehen, ob ein Glied wartet, und sonst eines starten (nach jedem Lauf)")
     clock.set_defaults(func=cmd_takt)
+
+    key = sub.add_parser("key", help="neues Schlüsselpaar für den öffentlichen Alarm erzeugen")
+    key.add_argument("--name", default="k1", help="Name des Schlüssels, steht in jeder Meldung (Standard: k1)")
+    key.set_defaults(func=cmd_key)
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stderr)

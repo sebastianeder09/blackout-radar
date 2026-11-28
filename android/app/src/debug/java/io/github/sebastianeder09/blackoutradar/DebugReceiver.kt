@@ -30,6 +30,11 @@ import android.content.Intent
  * Emulator-Test, dass die App das Thema daraus beim Öffnen selbst einträgt. Die Antwort nennt dann
  * "zwischenablage=true", oder "zwischenablage=false", wenn die Angabe kein Thema ist.
  *
+ * Mit "--ez freigabe true" erlaubt der Testbau der Kommandozeile von adb, die Datei zu lesen, mit der die App sich
+ * samt Thema weitergibt (AppFile). Dieselbe Erlaubnis bekommt sonst die App, die der Mensch zum Weitergeben wählt.
+ * Damit holt der Emulator-Test die Datei so ab, wie es ein Messenger täte: von außen und nur mit dieser Erlaubnis.
+ * Die Antwort nennt dann "freigabe=true", oder "freigabe=false", wenn es die Datei noch nicht gibt.
+ *
  * Mit "--ez absturz true" stürzt der Testbau absichtlich ab. Damit prüft der Emulator-Test,
  * dass er einen Absturz der App auch bemerkt.
  */
@@ -45,16 +50,24 @@ class DebugReceiver : BroadcastReceiver() {
                 val status = if (intent.hasExtra("status")) StatusRepo.refresh(app, 8_000) else null
                 if (intent.getBooleanExtra("ausgeruht", false)) Store.get(app).statusCheckedAt = 0L
                 val copied = intent.getStringExtra("zwischenablage")?.let { ", zwischenablage=" + copyShared(app, it) } ?: ""
+                val granted = if (intent.getBooleanExtra("freigabe", false)) ", freigabe=" + grantShare(app) else ""
                 val check = if (intent.getBooleanExtra("abgleich", false)) {
                     ", abgleich=" + (Watchdog.checkStatus(app, 8_000, minGapMs = 0L) ?: "nein")
                 } else ""
                 pending.resultData = "einrichten: " +
                     (setup?.let { "ok=${it.ok} meldungen=${it.count} ohne-netz=${it.offline}" } ?: "nein") +
-                    ", lagebericht=" + (status ?: "nein") + copied + check
+                    ", lagebericht=" + (status ?: "nein") + copied + granted + check
             } finally {
                 pending.finish()
             }
         }, "testbau").start()
+    }
+
+    /** Erlaubt der Kommandozeile von adb, die Datei zum Weitergeben zu lesen. Andere Apps bleiben draußen. */
+    private fun grantShare(context: Context): Boolean {
+        if (!AppFile.shareFile(context).isFile) return false
+        context.grantUriPermission("com.android.shell", AppFile.shareUri(context), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return true
     }
 
     /** Legt die Nachricht zum Weitergeben für dieses Ziel in die Zwischenablage. Schreiben darf eine App auch im Hintergrund. */

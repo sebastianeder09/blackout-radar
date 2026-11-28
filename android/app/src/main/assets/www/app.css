@@ -464,6 +464,7 @@ input.topic {
 }
 input.topic:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
 .setup .row { margin-top: 10px; }
+.setup #builtin { margin-top: 8px; }
 .setup .msg-line { min-height: 22px; margin: 10px 2px 0; font-size: 14.5px; }
 .setup .msg-line.error { color: var(--alarm); }
 .setup .msg-line.info { color: var(--muted); }

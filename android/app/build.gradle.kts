@@ -19,6 +19,9 @@ android {
         versionCode = buildNumber
         versionName = "1.$buildNumber"
         buildConfigField("String", "REPO", "\"sebastianeder09/blackout-radar\"")
+        // Die App samt Thema als Datei weitergeben (AppFile.kt). Das setzt voraus, dass die Installationsdatei
+        // am Handy dieselbe ist, die hier signiert wurde. Ein Bau für einen Store, der selbst signiert, stellt das ab.
+        buildConfigField("boolean", "APP_FILE", "true")
     }
 
     signingConfigs {

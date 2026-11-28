@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
@@ -28,6 +29,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import org.json.JSONObject
+import java.io.IOException
 import java.util.UUID
 
 /**
@@ -99,9 +101,10 @@ class MainActivity : Activity() {
                 pageReady = true
                 pendingTab?.let { showTab(it) }
                 pendingTab = null
-                pendingOffer?.let { offerTopic(it) }
+                val link = pendingOffer
                 pendingOffer = null
-                offerCopied()
+                // Ein Link, den der Mensch gerade angetippt hat, geht dem Thema aus der Installationsdatei vor.
+                if (link != null) offerTopic(link) else if (!offerBuiltIn()) offerCopied()
             }
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
@@ -139,15 +142,33 @@ class MainActivity : Activity() {
 
     /**
      * Ist noch kein Thema eingerichtet, verbindet die App sofort: Ein Tipp auf den Link genügt.
-     * Ein bestehendes Thema ersetzt sie nur nach Rückfrage.
+     * Ein bestehendes Thema ersetzt sie nur nach Rückfrage. [fromFile] sagt der Seite, dass das Thema
+     * nicht aus einem Link stammt, sondern aus der Installationsdatei.
      */
-    private fun offerTopic(target: Target) {
+    private fun offerTopic(target: Target, fromFile: Boolean = false) {
         val current = store.target
-        if (current == null) {
-            js("window.BR&&BR.offerTopic(${quote(target.topic)},${quote(Ntfy.mask(target.topic))},false,true)")
-            return
+        // Das ganze Ziel, nicht nur der Name: Bei einem eigenen Server gehört die Adresse dazu.
+        val topic = quote(Ntfy.plain(target))
+        val masked = quote(Ntfy.mask(target.topic))
+        js("window.BR&&BR.offerTopic($topic,$masked,${current == target},${current == null},$fromFile)")
+    }
+
+    /**
+     * Die Installationsdatei bringt ein Thema mit, weil ein anderes Handy die App samt Thema weitergegeben hat
+     * (siehe [ApkTopic]). Ist noch nichts eingerichtet, verbindet die App damit sofort: Eintippen muss niemand
+     * etwas. Ein bestehendes Thema ersetzt sie nur nach Rückfrage, und die stellt sie je Datei nur einmal.
+     * Liefert true, wenn die Seite jetzt mit diesem Thema befasst ist.
+     */
+    private fun offerBuiltIn(): Boolean {
+        val target = AppFile.pending(this) ?: return false
+        val current = store.target
+        if (current != null) {
+            // Wie auch immer die Antwort ausfällt: Dieselbe Datei fragt kein zweites Mal.
+            AppFile.markSeen(this)
+            if (current == target) return false
         }
-        js("window.BR&&BR.offerTopic(${quote(target.topic)},${quote(Ntfy.mask(target.topic))},${current == target},false)")
+        offerTopic(target, fromFile = true)
+        return true
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -166,6 +187,8 @@ class MainActivity : Activity() {
      */
     private fun offerCopied(again: Boolean = true) {
         if (!pageReady || !hasWindowFocus() || store.target != null) return
+        // Bringt die Installationsdatei das Thema mit, braucht es die Zwischenablage nicht.
+        if (AppFile.pending(this) != null) return
         val text = try {
             val clipboard = getSystemService(ClipboardManager::class.java) ?: return
             val about = clipboard.primaryClipDescription
@@ -462,6 +485,53 @@ class MainActivity : Activity() {
                 } catch (e: ActivityNotFoundException) {
                     // Dieses Gerät hat keine App, die Text annimmt.
                 }
+            }
+        }
+
+        /**
+         * Gibt die App selbst weiter: als Installationsdatei, die das Thema dieses Handys schon enthält (siehe
+         * [ApkTopic]). Android zeigt seine Auswahl (Messenger, Quick Share, Bluetooth …). Lesen darf die Datei
+         * nur die App, die der Mensch dort wählt.
+         */
+        @JavascriptInterface
+        fun shareApp() {
+            val target = store.target ?: return
+            val app = applicationContext
+            Thread({
+                val written = try {
+                    AppFile.writeShare(app, target)
+                    true
+                } catch (e: IOException) {
+                    false
+                }
+                runOnUiThread {
+                    if (!written) {
+                        js("window.BR&&BR.onShareFailed()")
+                        return@runOnUiThread
+                    }
+                    val uri = AppFile.shareUri(app)
+                    val send = Intent(Intent.ACTION_SEND)
+                        .setType(AppFile.MIME)
+                        .putExtra(Intent.EXTRA_STREAM, uri)
+                        .putExtra(Intent.EXTRA_TEXT, AppFile.SHARE_TEXT)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    // Mit dieser Angabe gilt die Leseerlaubnis auch für die Auswahl von Android, die den Namen der Datei zeigt.
+                    send.clipData = ClipData(AppFile.SHARE_NAME, arrayOf(AppFile.MIME), ClipData.Item(AppFile.SHARE_TEXT, null, null, uri))
+                    try {
+                        startActivity(Intent.createChooser(send, "App samt Thema weitergeben"))
+                    } catch (e: ActivityNotFoundException) {
+                        js("window.BR&&BR.onShareFailed()")
+                    }
+                }
+            }, "weitergeben").start()
+        }
+
+        /** Auf der Seite zum Einrichten: das Thema nehmen, das die Installationsdatei mitgebracht hat. */
+        @JavascriptInterface
+        fun useBuiltIn() {
+            runOnUiThread {
+                val target = AppFile.builtIn(applicationContext)
+                if (target != null && store.target == null) offerTopic(target, fromFile = true)
             }
         }
 

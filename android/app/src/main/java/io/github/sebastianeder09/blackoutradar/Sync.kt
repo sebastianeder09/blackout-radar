@@ -39,6 +39,8 @@ object Sync {
             // Ohne Antwort des Servers fehlt, was er von vorher noch hat. Das holt backfill nach.
             store.historyPending = notices == null
         }
+        // Ab jetzt gilt, was eingerichtet ist. Ein Thema aus der Installationsdatei meldet sich nicht noch einmal.
+        AppFile.markSeen(context)
         AppState.messagesChanged()
         Starter.ensure(context)
         ListenerService.kick(force = true)
@@ -54,6 +56,8 @@ object Sync {
             store.historyPending = false
             store.log.clear()
         }
+        // Die Kopie der App zum Weitergeben enthält das bisherige Thema.
+        AppFile.shareFile(context).delete()
         ListenerService.stop(context)
         Watchdog.disarm(context)
         AppState.messagesChanged()

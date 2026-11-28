@@ -57,6 +57,13 @@
             android:name=".WatchdogReceiver"
             android:exported="false" />
 
+        <!-- Gibt die Installationsdatei samt Thema an die App, die der Mensch zum Weitergeben wählt. Von außen nicht erreichbar. -->
+        <provider
+            android:name=".AppFileProvider"
+            android:authorities="${applicationId}.datei"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <receiver
             android:name=".BootReceiver"
             android:exported="false">

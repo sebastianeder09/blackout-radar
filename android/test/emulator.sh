@@ -7,8 +7,12 @@
 # nachgestellten Server (android/test/fake_ntfy.py auf Port 8765): Einrichten aus der kopierten
 # Nachricht eines anderen Handys, Anzeige bei einem Blackout, der Notweg über den Lagebericht
 # (Radar wird eine Meldung nicht los, falsches Thema, ntfy fällt aus) und Einrichten ohne Netz.
+# Zum Schluss geben beide die App als Datei samt Thema weiter (thema_datei.py rechnet am Rechner
+# nach, was in der Datei stehen muss), und beide werden aus dieser Datei frisch installiert:
+# Beim ersten Öffnen müssen sie verbunden sein, ohne dass jemand etwas eingibt.
 #
-# Was die App anzeigt, liest seite.py aus der Seite selbst. Ob das Bild am Handy einer Änderung
+# Was die App anzeigt, liest seite.py aus der Seite selbst. Auf jeder Seite, die der Lauf zeigt, sucht
+# fremdtext.js nach Text, der dort nie stehen soll (ein nacktes "null"). Ob das Bild am Handy einer Änderung
 # auch folgt, zeigt der Vergleich zweier Bildschirmfotos (Vorschau.java). Am Ende steht die Frage,
 # ob die App im Lauf abgestürzt ist, mit einem absichtlichen Absturz des Testbaus als Gegenprobe.
 # Ergebnisse (Bilder, Ablauf, Protokolle) landen in $OUT.
@@ -136,6 +140,20 @@ layout() {  # Paket Name: Kopfzeile oben, Leiste unten, nichts ragt seitlich hin
   [[ "$verdict" == ok* ]]
 }
 
+# Steht irgendwo in der Seite ein nacktes "null" oder "undefined" (fremdtext.js)? So etwas bleibt, wenn der Aufbau der
+# Seite einen fehlenden Wert als Text einfügt. Geprüft wird jede Seite, die der Lauf ohnehin zeigt, das Ergebnis
+# steht am Schluss in einer Zeile.
+PAGES=0
+STRAY=""
+clean() {  # Paket Name der Seite
+  local verdict
+  verdict=$(page "$1" "$(cat "$HERE/fremdtext.js")")
+  PAGES=$((PAGES + 1))
+  [ "$verdict" = sauber ] && return 0
+  log "Fremdtext, $2: ${verdict:-Seite nicht lesbar}"
+  STRAY="$STRAY \"$2\""
+}
+
 changed() {  # Bild1 Bild2 Von Bis: hat sich das Bild zwischen den beiden Höhen (Prozent von oben) geändert?
   local verdict code
   verdict=$(java -Djava.awt.headless=true "$HERE/Vorschau.java" vergleichen "$OUT/$1.png" "$OUT/$2.png" "$3" "$4" 2> "$OUT/vergleich-fehler.txt")
@@ -145,8 +163,8 @@ changed() {  # Bild1 Bild2 Von Bis: hat sich das Bild zwischen den beiden Höhen
 }
 
 # Zwei Stellen, an denen Android Abstürze und Hänger festhält:
-# 1. Die Liste der Prozessenden mit ihrem Grund. Sie reicht nur bis zum letzten Neustart sicher zurück,
-#    deshalb fragt der Test sie vor dem Neustart und am Schluss ab.
+# 1. Die Liste der Prozessenden mit ihrem Grund. Sie reicht nur bis zum letzten Neustart sicher zurück und
+#    beginnt mit einer neuen Installation von vorn, deshalb fragt der Test sie davor und am Schluss ab.
 # 2. Die Fehlerberichte (dropbox) mit dem Wortlaut des Fehlers. Sie bleiben über Neustarts erhalten.
 exits() {  # Paket: eine Zeile je Prozessende, z. B. "reason=2 (SIGNALED) subreason=0 (UNKNOWN) status=9"
   # Android 12 schreibt jede Angabe in eine eigene Zeile. "subreason=" zählt dort nicht als Grund.
@@ -171,6 +189,15 @@ reports() {  # Paket Datei: Fehlerberichte von Android zu Abstürzen und Hänger
 
 service_running() { adb shell dumpsys activity services "$1/.ListenerService" 2> /dev/null | grep -q "ServiceRecord"; }
 
+chooser() { adb shell dumpsys activity activities 2> /dev/null | grep -q "ChooserActivity"; }  # zeigt Android gerade seine Auswahl zum Weitergeben?
+
+size() { wc -c < "$1" | tr -d ' '; }  # Datei -> Größe in Bytes
+
+grant_and_exempt() {  # Paket: Benachrichtigungen erlauben und von der Akku-Optimierung ausnehmen, damit Android nicht nachfragt
+  [ "$SDK" -ge 33 ] && adb shell pm grant "$1" android.permission.POST_NOTIFICATIONS
+  adb shell dumpsys deviceidle whitelist +"$1" > /dev/null
+}
+
 wait_boot() {
   adb wait-for-device
   local start
@@ -192,16 +219,14 @@ adb shell settings put global animator_duration_scale 0
 
 adb install -r "$APK_DIR/blackout-radar.apk" > /dev/null && ok "Fertige App installiert" || bad "Fertige App ließ sich nicht installieren"
 adb install -r "$APK_DIR/blackout-radar-test.apk" > /dev/null || bad "Testbau ließ sich nicht installieren"
-for p in $PKG $DBG; do
-  [ "$SDK" -ge 33 ] && adb shell pm grant "$p" android.permission.POST_NOTIFICATIONS
-  adb shell dumpsys deviceidle whitelist +"$p" > /dev/null
-done
+for p in $PKG $DBG; do grant_and_exempt "$p"; done
 
 log "Bildschirm: $(adb shell wm size | tr -d '\r' | tr '\n' ' ')$(adb shell wm density | tr -d '\r' | tr '\n' ' ')"
 
 # ------------------------------------------------------------ Testbau: Blackout
 adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
 page_has "$DBG" "Alarme auf dieses Handy holen" && ok "Testbau: Einrichten wird angezeigt" || bad "Testbau: Einrichten fehlt"
+clean "$DBG" "Testbau: Einrichten"
 shot 00-einrichten
 # Ein weiteres Handy einrichten: Die weitergegebene Nachricht liegt in der Zwischenablage, so als hätte sie jemand
 # im Messenger kopiert. Wechselt der Mensch danach in die App, steht das Thema schon im Feld. Verbinden tippt er
@@ -238,10 +263,12 @@ done
 sleep 4
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab lage > /dev/null
 page_has "$DBG" "Laufender Stromausfall" && ok "Testbau: Lagebericht mit laufendem Blackout angezeigt" || bad "Testbau: Lagebericht fehlt"
+clean "$DBG" "Testbau: Lage"
 shot 10-blackout-lage
 layout "$DBG" "Testbau" && ok "Testbau: Kopfzeile und Leiste sitzen richtig" || bad "Testbau: Aufbau der Seite stimmt nicht"
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab meldungen > /dev/null
 page_has "$DBG" "Die App behält die letzten 300 Meldungen" && ok "Testbau: Liste der Meldungen angezeigt" || bad "Testbau: Liste der Meldungen fehlt"
+clean "$DBG" "Testbau: Meldungen"
 shot 11-blackout-meldungen
 # Eine Meldung kommt, während die Liste offen ist und niemand das Handy berührt. Bis zum Bild fragt
 # auch der Test die Seite nicht, damit die Anzeige wirklich von selbst nachziehen muss.
@@ -325,6 +352,7 @@ done
   || bad "Notweg: nach der Rückkehr von ntfy $(cards "Notweg von selbst") Karten und $(notifications "Notweg von selbst") Benachrichtigungen statt je 1"
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
 page_has "$DBG" "Meldungen kommen sofort an" && ok "Testbau: Verbindung wird als bestehend angezeigt" || bad "Testbau: Anzeige der Verbindung stimmt nicht"
+clean "$DBG" "Testbau: App"
 page_has "$DBG" "bereit · Abgleich" && ok "Testbau: Notweg wird als bereit angezeigt" || bad "Testbau: Anzeige des Notwegs stimmt nicht"
 shot 12-blackout-app
 adb shell cmd uimode night yes > /dev/null
@@ -342,12 +370,14 @@ sleep 3
 adb shell am start -W -a android.intent.action.VIEW -d "blackoutradar://abo/$TOPIC" -p "$PKG" > /dev/null
 page_has "$PKG" "Meldung der letzten 12 Stunden" && ok "Einrichten per Link: Thema übernommen, vorhandene Meldung gefunden" \
   || bad "Einrichten per Link: Ergebnis nicht wie erwartet"
+clean "$PKG" "fertige App: Ergebnis des Einrichtens"
 shot 01-eingerichtet
 page "$PKG" "document.querySelector('.result .btn.primary').click()" > /dev/null  # Knopf "Weiter"
 shot 02-lage 4  # bis zum Bild fragt der Test die Seite nicht weiter
 changed 01-eingerichtet 02-lage 15 90 && ok "Bild folgt dem Wechsel zur Lage von selbst" || bad "Bild bleibt nach dem Wechsel zur Lage stehen"
 page_has "$PKG" "Lagebericht des Blackout-Radars" && ok "Lagebericht des echten Radars geladen und angezeigt" \
   || bad "Lagebericht des echten Radars fehlt"
+clean "$PKG" "fertige App: Lage"
 layout "$PKG" "fertige App" && ok "Kopfzeile und Leiste sitzen richtig" || bad "Aufbau der Seite stimmt nicht"
 
 for _ in $(seq 1 30); do service_running "$PKG" && break; sleep 1; done
@@ -429,19 +459,28 @@ for title in "CI Vorab" "CI Alarm live" "CI Funkloch" "CI Ruhezustand" "CI Nach 
   page_has "$PKG" "$title" || missing="$missing \"$title\""
 done
 [ -z "$missing" ] && ok "Liste der Meldungen vollständig, auch nach dem Neustart" || bad "In der Liste der Meldungen fehlt:$missing"
+clean "$PKG" "fertige App: Meldungen"
 shot 04-meldungen
 adb shell am start -n "$PKG/.MainActivity" --es tab app > /dev/null
 page_has "$PKG" "Meldungen kommen sofort an" && ok "Verbindung wird als bestehend angezeigt" || bad "Anzeige der Verbindung stimmt nicht"
+clean "$PKG" "fertige App: App"
 shot 05-app
-# Weitergeben an ein weiteres Handy: Karte mit dem Knopf, dann zeigt Android seine Auswahl mit der fertigen Nachricht.
-page_has "$PKG" "App und Thema weitergeben" && ok "Knopf zum Weitergeben an weitere Handys vorhanden" || bad "Knopf zum Weitergeben fehlt"
+# Weitergeben an ein weiteres Handy: Karte mit den beiden Knöpfen. Android zeigt seine Auswahl, erst mit der fertigen
+# Nachricht, dann mit der App als Datei samt Thema. Was in dieser Datei steht, prüft der Schluss des Tests.
+page_has "$PKG" "App samt Thema weitergeben" && page_has "$PKG" "Nur Nachricht mit Link weitergeben" \
+  && ok "Knöpfe zum Weitergeben an weitere Handys vorhanden" || bad "Knöpfe zum Weitergeben fehlen"
 page "$PKG" "[...document.querySelectorAll('h3')].find(h => h.textContent === 'Weitere Handys').scrollIntoView({ block: 'center' })" > /dev/null
 shot 05b-weitere-handys
 page "$PKG" "Native.share()" > /dev/null
 sleep 3
-adb shell dumpsys activity activities 2> /dev/null | grep -q "ChooserActivity" \
-  && ok "Weitergeben öffnet die Auswahl von Android" || bad "Weitergeben öffnet die Auswahl von Android nicht"
+chooser && ok "Weitergeben der Nachricht öffnet die Auswahl von Android" || bad "Weitergeben der Nachricht öffnet die Auswahl von Android nicht"
 snap 06-weitergeben
+adb shell input keyevent KEYCODE_BACK
+sleep 2
+page "$PKG" "Native.shareApp()" > /dev/null
+sleep 3
+chooser && ok "Weitergeben als Datei öffnet die Auswahl von Android" || bad "Weitergeben als Datei öffnet die Auswahl von Android nicht"
+snap 06b-datei-weitergeben
 adb shell input keyevent KEYCODE_BACK
 adb shell am start -n "$PKG/.MainActivity" --es tab lage > /dev/null
 shot 07-lage 3
@@ -476,6 +515,122 @@ fi
 has_notification "$old_title" && bad "Testbau: nachgeholte ältere Meldung hat geläutet" || ok "Testbau: nachgeholte ältere Meldungen bleiben still"
 shot 15-nachgeholt
 
+# ------------------------------------------------- App samt Thema als Datei weitergeben
+# Ein eingerichtetes Handy gibt die App als Datei weiter, die sein Thema enthält (ApkTopic.kt). thema_datei.py legt
+# das Thema am Rechner mit eigenem Code in die gebaute Datei: Was das Handy schreibt, muss dem Byte für Byte gleichen.
+WORK=$(mktemp -d)
+SHARE=blackout-radar-mit-thema.apk
+python3 "$HERE/thema_datei.py" schreiben "$APK_DIR/blackout-radar-test.apk" "$WORK/testbau-erwartet.apk" http://10.0.2.2:8765/testthema \
+  && python3 "$HERE/thema_datei.py" schreiben "$APK_DIR/blackout-radar-test.apk" "$WORK/testbau-anderes.apk" http://10.0.2.2:8765/anderes-thema \
+  && python3 "$HERE/thema_datei.py" schreiben "$APK_DIR/blackout-radar.apk" "$WORK/fertig-erwartet.apk" "$TOPIC" \
+  || bad "Datei mit Thema ließ sich am Rechner nicht schreiben"
+
+same_file() {  # Name Vom-Handy Erwartet: gleicht die Datei vom Handy der erwarteten?
+  if cmp -s "$2" "$3"; then
+    ok "$1: Datei vom Handy ist die installierte App samt Thema, Byte für Byte ($(size "$2") Bytes)"
+  else
+    bad "$1: Datei vom Handy weicht ab ($(size "$2") statt $(size "$3") Bytes, Thema darin: $(python3 "$HERE/thema_datei.py" lesen "$2" 2>&1 | head -c 200)," \
+      "Anfang: $(head -c 200 "$2" | tr -c '[:print:]' '.'))"
+  fi
+}
+
+locked() {  # Paket: ohne Erlaubnis kommt niemand von außen an die Datei, auch nicht die Kommandozeile von adb
+  adb shell content read --uri "content://$1.datei/$SHARE" > "$WORK/ohne-erlaubnis.txt" 2>&1
+  [ "$(adb shell id -u | tr -d '\r')" = 2000 ] && grep -q "Permission Denial" "$WORK/ohne-erlaubnis.txt" && ! cmp -s -n 2 "$WORK/ohne-erlaubnis.txt" "$APK_DIR/blackout-radar.apk"
+}
+
+# Testbau: Knopf drücken, Android zeigt seine Auswahl. Die Datei liegt jetzt bereit.
+adb shell am start -W -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
+page_has "$DBG" "App samt Thema weitergeben" || bad "Testbau: Knopf zum Weitergeben als Datei fehlt"
+page "$DBG" "Native.shareApp()" > /dev/null
+sleep 3
+chooser && ok "Testbau: Weitergeben als Datei öffnet die Auswahl von Android" || bad "Testbau: Weitergeben als Datei öffnet die Auswahl von Android nicht"
+adb shell input keyevent KEYCODE_BACK
+# Abgeholt wird sie so, wie es ein Messenger täte: von außen, über die Adresse aus der Auswahl. Das geht erst mit der
+# Erlaubnis, die Android sonst der gewählten App gibt. Der Testbau erteilt sie hier der Kommandozeile von adb.
+locked "$DBG" && ok "Testbau: ohne Erlaubnis kommt von außen niemand an die Datei" \
+  || bad "Testbau: Datei ohne Erlaubnis nicht gesperrt: $(head -c 200 "$WORK/ohne-erlaubnis.txt" | tr -c '[:print:]' '.')"
+log "Testbau: $(debug_app --ez freigabe true)"
+adb exec-out "content read --uri content://$DBG.datei/$SHARE 2> /dev/null" > "$WORK/testbau-vom-handy.apk"  # Meldungen des Werkzeugs bleiben am Handy
+same_file "Testbau" "$WORK/testbau-vom-handy.apk" "$WORK/testbau-erwartet.apk"
+about=$(adb shell content query --uri "content://$DBG.datei/$SHARE" 2>&1 | tr -d '\r')
+[[ "$about" == *"_display_name=$SHARE"* && "$about" == *"_size=$(size "$WORK/testbau-erwartet.apk")"* ]] \
+  && ok "Testbau: die Datei nennt der empfangenden App Namen und Größe" || bad "Testbau: Angaben zur Datei stimmen nicht: $(head -c 300 <<< "$about")"
+
+# Fertige App: Sie hat ihre Datei weiter oben geschrieben. Einen Testzugang hat sie nicht, deshalb liest der Test die
+# Datei mit den Rechten, die nur der Emulator hergibt (root), über dieselbe Adresse aus.
+locked "$PKG" && ok "Fertige App: ohne Erlaubnis kommt von außen niemand an die Datei" \
+  || bad "Fertige App: Datei ohne Erlaubnis nicht gesperrt: $(head -c 200 "$WORK/ohne-erlaubnis.txt" | tr -c '[:print:]' '.')"
+if adb root > /dev/null 2>&1 && wait_boot; then
+  sleep 3
+  adb exec-out "content read --uri content://$PKG.datei/$SHARE 2> /dev/null" > "$WORK/fertig-vom-handy.apk"
+  adb unroot > /dev/null 2>&1
+  wait_boot
+  same_file "Fertige App" "$WORK/fertig-vom-handy.apk" "$WORK/fertig-erwartet.apk"
+else
+  log "adb root nicht möglich, Vergleich der Datei der fertigen App übersprungen"
+fi
+
+# Über eine vorhandene Installation gespielt, bleibt, was eingerichtet ist. Bringt die Datei ein anderes Thema mit,
+# fragt die App einmal nach und ersetzt nichts von selbst.
+answer=$(adb install -r "$WORK/testbau-anderes.apk" 2>&1) && ok "Datei mit Thema: Android spielt sie über die vorhandene App, die Signatur gilt" \
+  || bad "Datei mit Thema: ließ sich nicht über die vorhandene App spielen: $(tail -c 300 <<< "$answer" | tr '\n' ' ')"
+adb shell am start -W -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
+page_has "$DBG" "Die Installationsdatei bringt ein anderes Thema mit" && ok "Datei mit anderem Thema: App fragt nach, statt das Thema zu ersetzen" \
+  || bad "Datei mit anderem Thema: Rückfrage fehlt"
+clean "$DBG" "Testbau: Rückfrage zum Thema aus der Datei"
+shot 18-datei-anderes-thema
+page "$DBG" "document.querySelector('#modal .btn').click()" > /dev/null  # "Abbrechen"
+adb shell am force-stop "$DBG"
+adb shell am start -W -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
+page_has "$DBG" "Weitere Handys" > /dev/null
+sleep 2
+# Das bisherige Thema steht verdeckt in der Karte der Verbindung (neun Punkte für "testthema"), das andere begänne mit "ande".
+kept=$(page "$DBG" "!document.querySelector('#modal.show') && document.body.innerText.includes('•••••••••') && !document.body.innerText.includes('ande…ema')")
+[ "$kept" = true ] && ok "Datei mit anderem Thema: nach „Abbrechen“ bleibt das Thema, und die App fragt kein zweites Mal" \
+  || bad "Datei mit anderem Thema: Thema nicht behalten oder erneute Rückfrage ($kept)"
+
+# Das andere Handy: Beide Apps kommen frisch aus der Datei mit Thema. Beim ersten Öffnen müssen sie verbunden sein,
+# ohne dass jemand etwas eingibt. Mit der neuen Installation beginnt die Liste der Prozessenden von vorn.
+note_exits enden-vor-datei.txt
+adb uninstall "$DBG" > /dev/null
+adb uninstall "$PKG" > /dev/null
+answer=$(adb install "$WORK/testbau-erwartet.apk" 2>&1 && adb install "$WORK/fertig-erwartet.apk" 2>&1) \
+  && ok "Datei mit Thema: Android installiert sie auf frischem Stand, die Signatur gilt" \
+  || bad "Datei mit Thema: ließ sich nicht frisch installieren: $(tail -c 300 <<< "$answer" | tr '\n' ' ')"
+for p in $PKG $DBG; do grant_and_exempt "$p"; done
+
+adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
+if t=$(wait_page "$DBG" "Das Thema stand schon in der Installationsdatei" 40); then
+  ok "Testbau aus der Datei: beim ersten Öffnen nach $t s eingerichtet, ohne Eingabe"
+else
+  bad "Testbau aus der Datei: hat sich nicht von selbst eingerichtet"
+fi
+clean "$DBG" "Testbau aus der Datei: Ergebnis des Einrichtens"
+shot 19-datei-testbau-eingerichtet
+log "Testbau aus der Datei: $(debug_app --es status http://10.0.2.2:8765)"  # Lagebericht wieder vom nachgestellten Server
+curl -sS -H "Title: Aus der Datei" -H "Priority: 4" -H "Tags: warning" -d "Zustellung an das Handy, das die App als Datei bekam" http://127.0.0.1:8765/testthema > /dev/null
+if t=$(wait_notification "Aus der Datei" 40); then ok "Testbau aus der Datei: neue Meldung nach $t s als Benachrichtigung"; else bad "Testbau aus der Datei: neue Meldung kam nicht an"; fi
+
+adb shell am start -W -n "$PKG/.MainActivity" > /dev/null
+if t=$(wait_page "$PKG" "Das Thema stand schon in der Installationsdatei" 40); then
+  ok "Fertige App aus der Datei: beim ersten Öffnen nach $t s eingerichtet, ohne Eingabe"
+else
+  bad "Fertige App aus der Datei: hat sich nicht von selbst eingerichtet"
+fi
+page_has "$PKG" "der letzten 12 Stunden gefunden" && ok "Fertige App aus der Datei: Meldungen dieses Laufs bei ntfy.sh gefunden" \
+  || bad "Fertige App aus der Datei: Meldungen dieses Laufs nicht gefunden"
+clean "$PKG" "fertige App aus der Datei: Ergebnis des Einrichtens"
+shot 20-datei-fertige-app-eingerichtet
+page "$PKG" "document.querySelector('.result .btn.primary').click()" > /dev/null  # Knopf "Weiter"
+for _ in $(seq 1 30); do service_running "$PKG" && break; sleep 1; done
+sleep 5
+publish "CI Aus der Datei" 4 warning "Diese Meldung kam an dem Handy an, das die App als Datei samt Thema bekam."
+if t=$(wait_notification "CI Aus der Datei" 60); then ok "Fertige App aus der Datei: Meldung über ntfy.sh nach $t s angekommen"; else bad "Fertige App aus der Datei: Meldung über ntfy.sh nicht angekommen"; fi
+rm -rf "$WORK"
+
+[ -z "$STRAY" ] && ok "Keine der $PAGES geprüften Seiten zeigt Fremdtext wie „null“" || bad "Fremdtext wie „null“ in der Seite:$STRAY"
+
 adb logcat -d > "$OUT/logcat.txt" 2>&1
 adb shell dumpsys notification --noredact > "$OUT/benachrichtigungen.txt" 2>&1
 adb shell dumpsys activity services "$PKG" > "$OUT/dienste.txt" 2>&1
@@ -483,8 +638,8 @@ rm -f "$OUT/seite-fehler.txt" "$OUT/vergleich-fehler.txt"
 
 # Ist die fertige App oder der Testbau im Lauf abgestürzt oder hängen geblieben?
 note_exits enden-am-schluss.txt
-log "Prozessenden im Lauf: $(sort -u "$OUT/enden-vor-neustart.txt" "$OUT/enden-am-schluss.txt" | tr '\n' ';')"
-died=$(sort -u "$OUT/enden-vor-neustart.txt" "$OUT/enden-am-schluss.txt" | grep -E "$BAD_EXIT")
+log "Prozessenden im Lauf: $(sort -u "$OUT/enden-vor-neustart.txt" "$OUT/enden-vor-datei.txt" "$OUT/enden-am-schluss.txt" | tr '\n' ';')"
+died=$(sort -u "$OUT/enden-vor-neustart.txt" "$OUT/enden-vor-datei.txt" "$OUT/enden-am-schluss.txt" | grep -E "$BAD_EXIT")
 found=$(reports "$PKG" fehlerberichte.txt)
 if [ -n "$died" ] || [ -n "$found" ]; then
   bad "Die App ist im Lauf abgestürzt oder hängen geblieben"

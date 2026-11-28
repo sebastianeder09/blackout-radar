@@ -1,0 +1,176 @@
+{
+ "generated_at": "2026-11-28T19:51:03Z",
+ "timezone": "Europe/Vienna",
+ "active": [],
+ "recently_ended": [],
+ "watching": [],
+ "figures": [
+  {
+   "label": "Netzfrequenz Kontinentaleuropa",
+   "value": "50,014 Hz (Stand 20:49), letzte 24 Stunden 49,930 bis 50,057 Hz"
+  },
+  {
+   "label": "Stromlast Österreich",
+   "value": "7.754 MW (Stand 18:30), −15 % gegenüber dem Vortag"
+  },
+  {
+   "label": "Stromlast Deutschland",
+   "value": "63.344 MW (Stand 18:00), −12 % gegenüber dem Vortag"
+  },
+  {
+   "label": "Stromlast Tschechien",
+   "value": "8.711 MW (Stand 17:15), −11 % gegenüber dem Vortag"
+  },
+  {
+   "label": "Stromlast Slowakei",
+   "value": "3.754 MW (Stand 16:00), −8 % gegenüber dem Vortag"
+  },
+  {
+   "label": "Stromlast Ungarn",
+   "value": "6.412 MW (Stand 17:45), −8 % gegenüber dem Vortag"
+  },
+  {
+   "label": "Stromlast Schweiz",
+   "value": "9.148 MW (Stand 13:00), −2 % gegenüber dem Vortag"
+  },
+  {
+   "label": "Stromlast Frankreich",
+   "value": "61.991 MW (Stand 17:15), −8 % gegenüber dem Vortag"
+  },
+  {
+   "label": "Stromlast Spanien",
+   "value": "29.584 MW (Stand 17:45), −13 % gegenüber dem Vortag"
+  },
+  {
+   "label": "Stromlast Portugal",
+   "value": "6.849 MW (Stand 14:00), −13 % gegenüber dem Vortag"
+  },
+  {
+   "label": "Stromlast Polen",
+   "value": "22.869 MW (Stand 17:15), −10 % gegenüber dem Vortag"
+  }
+ ],
+ "statistics": [
+  {
+   "days": 1,
+   "label": "24 Stunden",
+   "outages": 0,
+   "frequency_alarms": 0,
+   "longest": null
+  },
+  {
+   "days": 7,
+   "label": "7 Tage",
+   "outages": 0,
+   "frequency_alarms": 0,
+   "longest": null
+  },
+  {
+   "days": 30,
+   "label": "30 Tage",
+   "outages": 0,
+   "frequency_alarms": 0,
+   "longest": null
+  },
+  {
+   "days": 90,
+   "label": "90 Tage",
+   "outages": 0,
+   "frequency_alarms": 0,
+   "longest": null
+  }
+ ],
+ "history": [],
+ "sources": [
+  {
+   "name": "frequency",
+   "label": "Netzfrequenz",
+   "ok": true,
+   "state": "in Ordnung",
+   "data_time": "2026-11-28T19:49:51Z",
+   "note": ""
+  },
+  {
+   "name": "load",
+   "label": "Stromlast (Energy-Charts, Daten von ENTSO-E)",
+   "ok": true,
+   "state": "in Ordnung",
+   "data_time": "2026-11-28T18:00:00Z",
+   "note": ""
+  },
+  {
+   "name": "utility",
+   "label": "Störmeldungen LINZ NETZ",
+   "ok": true,
+   "state": "in Ordnung",
+   "data_time": "2026-11-28T19:51:03Z",
+   "note": ""
+  },
+  {
+   "name": "news",
+   "label": "Medien (Google News, Feeds aus Übersee)",
+   "ok": true,
+   "state": "in Ordnung",
+   "data_time": "2026-11-28T19:51:03Z",
+   "note": ""
+  }
+ ],
+ "europe": {
+  "silent_since": null,
+  "hosts": [
+   {
+    "host": "api.energy-charts.info",
+    "label": "Energy-Charts (Freiburg)",
+    "checked": "2026-11-28T19:51:03Z",
+    "reached": true,
+    "fail_since": null
+   },
+   {
+    "host": "dat.netzfrequenzmessung.de",
+    "label": "netzfrequenzmessung.de (Nürnberg)",
+    "checked": "2026-11-28T17:04:35Z",
+    "reached": null,
+    "fail_since": null
+   },
+   {
+    "host": "www.linznetz.at",
+    "label": "LINZ NETZ (Linz)",
+    "checked": "2026-11-28T19:51:03Z",
+    "reached": true,
+    "fail_since": null
+   }
+  ]
+ },
+ "notices": [
+  {
+   "key": "daily:2026-11-28",
+   "t": "2026-11-28T06:03:39Z",
+   "title": "Lagebericht 28.11.: keine größeren Stromausfälle",
+   "body": "Letzte 24 Stunden: keine gemeldeten Stromausfälle.\nGemeldete Stromausfälle: 0 in 7 Tagen, 0 in 30 Tagen.\nNetzfrequenz Kontinentaleuropa: 50,033 Hz (Stand 07:01), letzte 24 Stunden 49,933 bis 50,057 Hz\nStromlast Österreich: 6.077 MW (Stand 03:45), −6 % gegenüber dem Vortag\nDatenquellen: alle 4 in Ordnung.\nÜberwachung: 219 Läufe seit dem letzten Lagebericht, längste Pause 44 min.",
+   "level": "daily",
+   "scope": "all",
+   "delivered": [
+    "ntfy"
+   ],
+   "pending": []
+  },
+  {
+   "key": "hello:2026-11-27",
+   "t": "2026-11-27T08:37:28Z",
+   "title": "Blackout-Radar ist aktiv: keine größeren Stromausfälle",
+   "body": "",
+   "level": "info",
+   "scope": "all",
+   "delivered": [
+    "ntfy"
+   ],
+   "pending": []
+  }
+ ],
+ "public": {
+  "enabled": true,
+  "server": "https://ntfy.sh",
+  "topic": "blackout-radar-alarm",
+  "key": "k1"
+ }
+}

@@ -14,7 +14,10 @@
 # nach, was in der Datei stehen muss), und beide werden aus dieser Datei frisch installiert:
 # Beim ersten Öffnen müssen sie verbunden sein, ohne dass jemand etwas eingibt.
 # Zum Schluss schaltet die fertige App den öffentlichen Alarm am echten Thema ein (sie liest dort nur),
-# und der Testbau der Fassung für Google Play (eigener Paketname) zeigt, dass er läuft und alarmiert.
+# und der Testbau der Fassung für Google Play (eigener Paketname) zeigt, dass er läuft und alarmiert. Diese
+# Fassung führt unten nur "Lage" und "Meldungen", die Einstellungen liegen hinter dem Zahnrad, und fremde Dienste
+# (GitHub, ntfy) nennt sie nur in der Datenschutzerklärung. Ihr Name muss in der Kopfzeile auch auf einem schmalen
+# Handy (360 dp) mit großer Schrift ganz zu lesen sein: Dafür stellt der Lauf Breite und Schriftgröße um.
 #
 # Was die App anzeigt, liest seite.py aus der Seite selbst. Auf jeder Seite, die der Lauf zeigt, sucht
 # fremdtext.js nach Text, der dort nie stehen soll (ein nacktes "null"). Ob das Bild am Handy einer Änderung
@@ -176,6 +179,26 @@ layout() {  # Paket Name: Kopfzeile oben, Leiste unten, nichts ragt seitlich hin
   verdict=$(page "$1" "$(cat "$HERE/aufbau.js")")
   log "Aufbau $2: ${verdict:-nicht lesbar}"
   [[ "$verdict" == ok* ]]
+}
+
+title_whole() {  # Paket Name: steht der Name der App in der Kopfzeile ganz da, nicht mit "…" abgeschnitten?
+  local verdict
+  verdict=$(page "$1" "(h => !h ? 'FEHLER: Name fehlt' : (h.scrollWidth > h.clientWidth + 1 ? 'FEHLER: abgeschnitten' : 'ok') + ' (Name ' + h.scrollWidth + ' breit, Platz ' + h.clientWidth + ', Seite ' + innerWidth + ', Schrift mal ' + (h.closest('header').style.getPropertyValue('--fit') || '1') + ', Verbindung als ' + ((l => l && l.offsetParent ? 'Wort' : 'Punkt')(document.querySelector('header.top .pill .label'))) + ')')(document.querySelector('header.top .brand h1'))")
+  log "Name in der Kopfzeile, $2: ${verdict:-nicht lesbar}"
+  [[ "$verdict" == ok* ]]
+}
+
+# Die Fassung für Google Play nennt fremde Dienste (GitHub, ntfy) nur in der Datenschutzerklärung. Geprüft wird jede
+# ihrer Seiten, die der Lauf zeigt, samt zugeklappten Abschnitten. Das Ergebnis steht am Schluss in einer Zeile.
+NAMED_PAGES=0
+NAMED=""
+unnamed() {  # Paket Name der Seite
+  local verdict
+  verdict=$(page "$1" "(t => (t.match(/github|ntfy/gi) || []).filter((x, i, a) => a.indexOf(x) === i).join(', ') || 'keine')(document.getElementById('app').textContent)")
+  NAMED_PAGES=$((NAMED_PAGES + 1))
+  [ "$verdict" = keine ] && return 0
+  log "Fremder Dienst genannt, $2: ${verdict:-Seite nicht lesbar}"
+  NAMED="$NAMED \"$2\""
 }
 
 # Steht irgendwo in der Seite ein nacktes "null" oder "undefined" (fremdtext.js)? So etwas bleibt, wenn der Aufbau der
@@ -354,6 +377,7 @@ page_has "$DBG" "Laufender Stromausfall" && ok "Testbau: Lagebericht mit laufend
 clean "$DBG" "Testbau: Lage"
 shot 10-blackout-lage
 layout "$DBG" "Testbau" && ok "Testbau: Kopfzeile und Leiste sitzen richtig" || bad "Testbau: Aufbau der Seite stimmt nicht"
+title_whole "$DBG" "Testbau" && ok "Testbau: Name der App steht in der Kopfzeile ganz da" || bad "Testbau: Name der App ist in der Kopfzeile abgeschnitten"
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab meldungen > /dev/null
 page_has "$DBG" "Die App behält die letzten 300 Meldungen" && ok "Testbau: Liste der Meldungen angezeigt" || bad "Testbau: Liste der Meldungen fehlt"
 clean "$DBG" "Testbau: Meldungen"
@@ -376,7 +400,7 @@ n=$(reconcile)
 
 # 1. Der Radar wird eine Meldung bei ntfy nicht los. Die App holt sie aus dem Lagebericht, so laut wie über ntfy.
 radar schalter '{"radar_erreicht_ntfy": false}' > /dev/null
-log "Radar: $(radar radar/meldung '{"title": "Notweg Alarm", "body": "Probe aus dem Emulator-Test: Diese Meldung wurde der Radar bei ntfy nicht los.", "level": "alarm"}')"
+log "Radar: $(radar radar/meldung '{"title": "Notweg Alarm", "body": "Probe aus dem Emulator-Test: Diese Meldung wurde der Radar beim Push-Dienst nicht los.", "level": "alarm"}')"
 n=$(reconcile)
 [ "$n" = 1 ] && ok "Notweg: Meldung, die der Radar nicht loswurde, aus dem Lagebericht geholt" || bad "Notweg: Abgleich ergab $n statt 1"
 if wait_notification "Notweg Alarm" 20 > /dev/null; then ok "Notweg: Alarm als Benachrichtigung"; else bad "Notweg: Alarm nicht als Benachrichtigung"; fi
@@ -418,7 +442,7 @@ n=$(reconcile)
 # 5. ntfy fällt aus, der Lagebericht bleibt erreichbar. Niemand stößt den Abgleich an: Die App muss von selbst
 #    im Lagebericht nachsehen. Der letzte Abgleich gilt dafür als lange her, sonst wartete sie den Mindestabstand ab.
 radar schalter '{"handy_erreicht_ntfy": false}' > /dev/null
-log "Radar: $(radar radar/meldung '{"title": "Notweg von selbst", "body": "Probe aus dem Emulator-Test: ntfy war für das Handy nicht erreichbar.", "level": "alarm"}')"
+log "Radar: $(radar radar/meldung '{"title": "Notweg von selbst", "body": "Probe aus dem Emulator-Test: Der Push-Dienst war für das Handy nicht erreichbar.", "level": "alarm"}')"
 debug_app --ez ausgeruht true > /dev/null
 if t=$(wait_notification "Notweg von selbst" 240); then ok "Notweg: ntfy ausgefallen, App alarmiert nach $t s von selbst"; else bad "Notweg: ntfy ausgefallen, App hat nicht von selbst alarmiert"; fi
 page_has "$DBG" "ntfy war von diesem Handy aus nicht erreichbar" && ok "Notweg: Liste nennt den Ausfall von ntfy als Grund" || bad "Notweg: Grund für den Ausfall von ntfy fehlt"
@@ -524,7 +548,7 @@ shot 23-oeffentlich-nach-fremdem
 n=$(reconcile)
 [ "$n" = 0 ] && ok "Öffentlicher Notweg: solange nichts fehlt, holt er nichts" || bad "Öffentlicher Notweg: Abgleich ohne fehlende Meldung ergab $n statt 0"
 radar schalter '{"radar_erreicht_ntfy": false}' > /dev/null
-log "Radar: $(radar radar/meldung '{"title": "Notweg an alle", "body": "Probe aus dem Emulator-Test: Diese Meldung wurde der Radar bei ntfy nicht los.", "level": "alarm"}')"
+log "Radar: $(radar radar/meldung '{"title": "Notweg an alle", "body": "Probe aus dem Emulator-Test: Diese Meldung wurde der Radar beim Push-Dienst nicht los.", "level": "alarm"}')"
 log "Radar: $(radar radar/meldung '{"title": "Nur an den Betreiber", "body": "Probe aus dem Emulator-Test: Meldung über den Betrieb des Radars.", "level": "warn", "scope": "operator"}')"
 n=$(reconcile)
 [ "$n" = 1 ] && ok "Öffentlicher Notweg: fehlende Meldung aus dem Lagebericht geholt" || bad "Öffentlicher Notweg: Abgleich ergab $n statt 1"
@@ -950,7 +974,16 @@ if t=$(wait_page "$PLAY" "Alarm ist eingeschaltet" 40); then ok "Play: öffentli
 tap "$PLAY" "document.querySelector('.result .btn.primary')" > /dev/null  # Knopf "Weiter"
 page_has "$PLAY" "Laufender Stromausfall" && ok "Play: Lagebericht wird angezeigt" || bad "Play: Lagebericht fehlt"
 clean "$PLAY" "Play: Lage"
+unnamed "$PLAY" "Play: Lage"
 layout "$PLAY" "Play" && ok "Play: Kopfzeile und Leiste sitzen richtig" || bad "Play: Aufbau der Seite stimmt nicht"
+# Diese Fassung führt unten nur "Lage" und "Meldungen". Die Einstellungen liegen hinter dem Zahnrad, "Über uns" hinter
+# dem Namen in der Kopfzeile. Aktualisiert wird beim Stand des Lageberichts.
+bar=$(page "$PLAY" "[...document.querySelectorAll('nav.tabs button')].map(b => b.textContent.trim()).join(', ')")
+[ "$bar" = "Lage, Meldungen" ] && ok "Play: Leiste unten zeigt nur Lage und Meldungen" || bad "Play: Leiste unten zeigt „$bar“ statt „Lage, Meldungen“"
+title_whole "$PLAY" "Play" && ok "Play: Name der App steht in der Kopfzeile ganz da" || bad "Play: Name der App ist in der Kopfzeile abgeschnitten"
+# Breite der Schrift in der Zeile unter dem Namen, als Maß dafür, ob eine größere Schrift später in der Seite ankommt
+by_width() { page "$PLAY" "(e => { const r = document.createRange(); r.selectNodeContents(e); return Math.round(r.getBoundingClientRect().width); })(document.querySelector('header.top .by'))"; }
+by_normal=$(by_width)
 shot 31-play-lage
 for _ in $(seq 1 30); do service_running "$PLAY" && break; sleep 1; done
 service_running "$PLAY" && ok "Play: Hintergrunddienst läuft" || bad "Play: Hintergrunddienst läuft nicht"
@@ -961,19 +994,76 @@ for _ in $(seq 1 20); do
   sleep 2
 done
 [ "$arrived" = ja ] && ok "Play: unterschriebener Alarm als Benachrichtigung dieser Fassung" || bad "Play: unterschriebener Alarm kam nicht an"
-adb shell am start -n "$PLAY/$PKG.MainActivity" --es tab app > /dev/null
-page_has "$PLAY" "Neue Versionen kommen über den Play Store" && ok "Play: neue Fassungen kommen über den Store" \
-  || bad "Play: Hinweis auf den Play Store fehlt"
-foreign=$(page "$PLAY" "['Nach neuer Version suchen', 'Neue Version herunterladen', 'App samt Thema weitergeben'].filter(t => document.body.innerText.includes(t)).join(', ')")
-[ -z "$foreign" ] && ok "Play: keine eigene Suche nach neuen Fassungen, keine Weitergabe als Datei" \
-  || bad "Play: Die Seite „App“ bietet an, was es über den Store nicht geben darf: $foreign"
-clean "$PLAY" "Play: App"
-shot 32-play-app
-adb shell am start -n "$PLAY/$PKG.MainActivity" --es tab firma > /dev/null
+tap "$PLAY" "$(button 'nav.tabs button' Meldungen)" > /dev/null
+page_has "$PLAY" "Alarm im Play-Bau" && ok "Play: Liste der Meldungen zeigt den Alarm" || bad "Play: Alarm fehlt in der Liste der Meldungen"
+clean "$PLAY" "Play: Meldungen"
+unnamed "$PLAY" "Play: Meldungen"
+shot 32-play-meldungen
+[ "$(tap "$PLAY" "document.getElementById('settings')")" = ja ] || bad "Play: Zahnrad in der Kopfzeile fehlt"
+page_has "$PLAY" "Neue Versionen kommen über den Play Store" && ok "Play: Zahnrad öffnet die Einstellungen, neue Fassungen kommen über den Store" \
+  || bad "Play: Einstellungen oder Hinweis auf den Play Store fehlen"
+foreign=$(page "$PLAY" "['Nach neuer Version suchen', 'Neue Version herunterladen', 'App samt Thema weitergeben', 'Eigenen Radar verbinden', 'Lagebericht bei GitHub'].filter(t => document.body.innerText.includes(t)).join(', ') || 'nichts'")
+[ "$foreign" = nichts ] && ok "Play: keine eigene Suche nach neuen Fassungen, keine Weitergabe als Datei, kein eigener Radar" \
+  || bad "Play: Die Einstellungen bieten an, was es über den Store nicht geben darf: ${foreign:-Seite nicht lesbar}"
+clean "$PLAY" "Play: Einstellungen"
+unnamed "$PLAY" "Play: Einstellungen"
+shot 33-play-einstellungen
+[ "$(tap "$PLAY" "document.getElementById('about')")" = ja ] || bad "Play: Knopf „Über ASE-IT“ fehlt in den Einstellungen"
 page_has "$PLAY" "Wir vernetzen Sie!" && ok "Play: Seite „Über uns“ wird angezeigt" || bad "Play: Seite „Über uns“ fehlt"
 clean "$PLAY" "Play: Über uns"
-shot 33-play-ueber-uns
+unnamed "$PLAY" "Play: Über uns"
+shot 34-play-ueber-uns
+# Zurück führt eine Ebene zurück: von "Über uns" zu den Einstellungen, von dort zu den Meldungen, von dort zur Lage.
+sub() { page "$PLAY" "(h => h ? h.textContent : (b => b ? b.textContent.trim() : '')(document.querySelector('nav.tabs button[aria-selected=\"true\"]')))([...document.querySelectorAll('.subhead h2')].find(h => h.offsetParent))"; }
+way=""
+for _ in 1 2 3; do
+  adb shell input keyevent KEYCODE_BACK
+  sleep 2
+  way="$way$(sub), "
+done
+[ "$way" = "Einstellungen, Meldungen, Lage, " ] && front "$PLAY" && ok "Play: Zurück führt von „Über uns“ über Einstellungen und Meldungen zur Lage, die App bleibt offen" \
+  || bad "Play: Zurück führte von „Über uns“ über „${way}“ statt über Einstellungen, Meldungen und Lage, oder die App ist nicht mehr vorn"
+[ "$(tap "$PLAY" "document.getElementById('brand')")" = ja ] || bad "Play: Name in der Kopfzeile ist kein Knopf"
+page_has "$PLAY" "Wir vernetzen Sie!" && ok "Play: Der Name in der Kopfzeile führt zu „Über uns“" || bad "Play: Der Name in der Kopfzeile führt nicht zu „Über uns“"
+tap "$PLAY" "$(button '.legal-links .link-btn' Impressum)" > /dev/null
+page_has "$PLAY" "Gewerbebehörde" && ok "Play: Impressum öffnet sich aus der App" || bad "Play: Impressum fehlt in der App"
+outside=$(page "$PLAY" "(l => ((/github|ntfy/i.test(l.textContent) ? 'nennt GitHub oder ntfy ' : '') + (l.textContent.includes('Im Browser öffnen') ? 'verweist in den Browser' : '')) || 'sauber')(document.getElementById('legal'))")
+[ "$outside" = sauber ] && ok "Play: Impressum nennt keine fremden Dienste und verweist nicht nach außen" || bad "Play: Impressum ${outside:-nicht lesbar}"
+shot 35-play-impressum
+adb shell input keyevent KEYCODE_BACK
+sleep 2
+adb shell input keyevent KEYCODE_BACK
+page_has "$PLAY" "Laufender Stromausfall" > /dev/null
 
+# Schmales Handy mit großer Schrift: 360 dp ist die häufigste Breite, und Android vergrößert in der App die Schrift
+# der Seite mit der Schriftgröße des Handys. Der Name der App muss in der Kopfzeile trotzdem ganz zu lesen sein.
+pixels=$(adb shell wm size | tr -d '\r' | sed -n 's/.*Physical size: \([0-9]*\)x.*/\1/p')
+adb shell wm density $((${pixels:-1080} * 160 / 360)) > /dev/null
+adb shell settings put system font_scale 1.3 > /dev/null
+sleep 5
+adb shell am start -W -n "$PLAY/$PKG.MainActivity" > /dev/null
+wait_page "$PLAY" "Laufender Stromausfall" 40 > /dev/null || log "Play: Seite nach dem Umstellen von Breite und Schrift nicht lesbar"
+narrow=$(page "$PLAY" "innerWidth")
+by_big=$(by_width)
+log "Play, schmal und große Schrift: Seite ${narrow:-?} breit, Zeile unter dem Namen $by_normal -> ${by_big:-?} breit"
+if [[ "$narrow" =~ ^[0-9]+$ ]] && [ "$narrow" -le 361 ] && [[ "$by_big" =~ ^[0-9]+$ ]] && [[ "$by_normal" =~ ^[0-9]+$ ]] && [ $((by_big * 100)) -ge $((by_normal * 120)) ]; then
+  title_whole "$PLAY" "Play, 360 dp und Schrift 130 %" && layout "$PLAY" "Play, 360 dp und Schrift 130 %" \
+    && ok "Play: Name der App bleibt auf 360 dp Breite mit großer Schrift ganz lesbar" \
+    || bad "Play: Kopfzeile stimmt auf 360 dp Breite mit großer Schrift nicht"
+else
+  bad "Play: Breite 360 dp und große Schrift kamen in der Seite nicht an (Seite ${narrow:-?} breit, Zeile unter dem Namen $by_normal -> ${by_big:-?})"
+fi
+clean "$PLAY" "Play: Lage, schmal und große Schrift"
+shot 36-play-schmal-grosse-schrift
+[ "$(tap "$PLAY" "document.getElementById('settings')")" = ja ] && page_has "$PLAY" "Neue Versionen kommen über den Play Store" > /dev/null
+title_whole "$PLAY" "Play, Einstellungen, 360 dp und Schrift 130 %" && layout "$PLAY" "Play, Einstellungen, 360 dp und Schrift 130 %" \
+  && ok "Play: Einstellungen sitzen auf 360 dp Breite mit großer Schrift richtig" || bad "Play: Einstellungen stimmen auf 360 dp Breite mit großer Schrift nicht"
+shot 37-play-einstellungen-schmal
+adb shell settings put system font_scale 1.0 > /dev/null
+adb shell wm density reset > /dev/null
+sleep 5
+
+[ -z "$NAMED" ] && ok "Play: keine der $NAMED_PAGES geprüften Seiten nennt GitHub oder ntfy" || bad "Play nennt GitHub oder ntfy auf:$NAMED"
 [ -z "$STRAY" ] && ok "Keine der $PAGES geprüften Seiten zeigt Fremdtext wie „null“" || bad "Fremdtext wie „null“ in der Seite:$STRAY"
 
 adb logcat -d > "$OUT/logcat.txt" 2>&1

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Blackout-Radar</string>
+    <!-- Der Name unter dem Symbol am Startbildschirm. Viele Handys schneiden dort ab etwa zwölf Zeichen ab,
+         deshalb steht hier die kurze Form. In der App und im Store heißt sie "Blackout-Radar". -->
+    <string name="app_name">Blackout</string>
 </resources>

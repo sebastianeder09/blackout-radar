@@ -37,8 +37,4 @@ Der Blackout-Radar wertet öffentliche Messdaten zum Stromnetz aus und meldet gr
 - Der Dienst wird freiwillig und unentgeltlich bereitgestellt. Ein Anspruch auf Verfügbarkeit besteht nicht. Für Schäden aus der Nutzung oder aus dem Ausbleiben einer Meldung wird nicht gehaftet, soweit das gesetzlich zulässig ist.
 - Die App enthält Verweise auf fremde Seiten. Für deren Inhalte sind die jeweiligen Betreiber verantwortlich.
 
-## Quelltext
-
-Radar und App sind quelloffen: [github.com/sebastianeder09/blackout-radar](https://github.com/sebastianeder09/blackout-radar).
-
 Stand: 28. November 2026

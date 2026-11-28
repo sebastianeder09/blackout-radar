@@ -428,4 +428,21 @@ class FallbackTest {
         assertEquals(4, public.toSet().size)
         assertEquals("", Fallback.reason("", public = true))
     }
+
+    @Test
+    fun grundInWortenOhneNamenDesDienstesInDerPlayFassung() {
+        val wege = listOf(Fallback.VIA_RADAR, Fallback.VIA_NET, Fallback.VIA_TOPIC, "neu")
+        for (public in listOf(true, false)) {
+            val play = wege.map { Fallback.reason(it, public = public, play = true) }
+            val github = wege.map { Fallback.reason(it, public = public, play = false) }
+            // Die Fassung aus dem Play Store nennt den Dienst nicht beim Namen, sagt sonst aber dasselbe.
+            assertTrue(play.none { it.contains("ntfy", ignoreCase = true) })
+            assertEquals(3, github.count { it.contains("ntfy") })
+            assertEquals(github.map { it.replace("an ntfy", "an den Push-Dienst").replace("ntfy", "Der Push-Dienst") }, play)
+            assertEquals(4, play.toSet().size)
+            assertEquals("", Fallback.reason("", public = public, play = true))
+        }
+        // Ohne Angabe gilt die Fassung, die gerade gebaut ist.
+        assertEquals(Fallback.reason(Fallback.VIA_NET, play = BuildConfig.PLAY), Fallback.reason(Fallback.VIA_NET))
+    }
 }

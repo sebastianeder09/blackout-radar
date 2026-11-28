@@ -101,8 +101,10 @@ h2, h3, h4 { margin: 0; line-height: 1.3; }
   background: linear-gradient(90deg, var(--brand-a), var(--brand-b));
 }
 .brand { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+/* Play: Der Name ist ein Knopf und führt zu "Über uns". */
+button.brand { padding: 0; border: 0; background: none; text-align: left; }
 .brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
-.brand h1 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brand h1 { margin: 0; font-size: calc(19px * var(--fit, 1)); font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .by { font-size: 11.5px; font-weight: 650; color: var(--accent); letter-spacing: .02em; white-space: nowrap; }
 .logo { width: 30px; height: 30px; flex: none; }
 
@@ -125,6 +127,9 @@ h2, h3, h4 { margin: 0; line-height: 1.3; }
 .pill.warn { color: var(--warn); background: var(--warn-bg); }
 .pill.alarm { color: var(--alarm); background: var(--alarm-bg); }
 .pill.warn .dot { animation: pulse 1.2s ease-in-out infinite; }
+/* Wird es in der Kopfzeile eng, schrumpft der Name über --fit, und das Wort neben dem Punkt weicht (fitHeader in app.js). */
+.top.tight .pill .label { display: none; }
+.top.tight .pill { min-width: 32px; padding: 5px 9px; justify-content: center; }
 
 .icon-btn {
   display: inline-flex;
@@ -136,8 +141,22 @@ h2, h3, h4 { margin: 0; line-height: 1.3; }
   border-radius: 50%;
   background: none;
   color: var(--muted);
+  position: relative;
+  flex: none;
 }
 .icon-btn:active { background: var(--soft); }
+/* Punkt am Zahnrad (Play), wenn in den Einstellungen etwas zu tun ist */
+.icon-btn .badge-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--alarm);
+  border: 2px solid var(--card);
+}
+.icon-btn .badge-dot[hidden] { display: none; }
 .spin .ico svg, .ico.spin svg { animation: spin 1s linear infinite; }
 
 /* Schmale Handys (360 dp ist die häufigste Breite): Der Name der App muss neben dem Stand der Verbindung Platz haben. */
@@ -145,7 +164,7 @@ h2, h3, h4 { margin: 0; line-height: 1.3; }
   .top { gap: 6px; padding-left: 12px; }
   .logo { width: 26px; height: 26px; }
   .brand { gap: 8px; }
-  .brand h1 { font-size: 16px; }
+  .brand h1 { font-size: calc(16px * var(--fit, 1)); }
   .pill { font-size: 12px; padding: 5px 8px; }
   .icon-btn { width: 36px; height: 36px; }
 }
@@ -157,6 +176,9 @@ h2, h3, h4 { margin: 0; line-height: 1.3; }
 
 main { padding: 14px 14px 92px; max-width: 720px; margin: 0 auto; }
 .view[hidden] { display: none; }
+/* Play: Kopf der Unterseiten "Einstellungen" und "Über uns" */
+.subhead { display: flex; align-items: center; gap: 2px; margin: -6px 0 8px -8px; }
+.subhead h2 { font-size: 20px; font-weight: 700; letter-spacing: -.01em; }
 
 nav.tabs {
   position: fixed;
@@ -223,6 +245,9 @@ nav.tabs .badge-dot {
   background: var(--card);
 }
 .hero .hero-head { display: flex; align-items: flex-start; gap: 12px; }
+.hero .hero-text { flex: 1; min-width: 0; }
+/* Play: Knopf zum Aktualisieren beim Stand des Lageberichts */
+.hero .hero-reload { margin: -6px -8px -6px -4px; }
 .hero .hero-icon {
   flex: none;
   display: inline-flex;

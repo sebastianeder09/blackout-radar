@@ -144,8 +144,12 @@ object Legal {
 
     private val NAMES = setOf(IMPRINT, PRIVACY)
 
-    /** Die Adresse, unter der derselbe Text öffentlich steht. Sie gehört auch in den Eintrag im Play Store. */
-    fun url(name: String): String = "https://github.com/" + BuildConfig.REPO + "/blob/main/docs/" + name + ".md"
+    /**
+     * Die Adresse, unter der derselbe Text öffentlich steht, oder leer. Die Fassung aus dem Play Store zeigt den
+     * Text nur in der App und verweist nicht nach außen: Die öffentliche Adresse steht dort im Eintrag im Store.
+     */
+    fun url(name: String): String =
+        if (BuildConfig.PLAY) "" else "https://github.com/" + BuildConfig.REPO + "/blob/main/docs/" + name + ".md"
 
     /** Der Text aus der App selbst, oder leer, wenn es ihn nicht gibt. */
     fun text(context: Context, name: String): String {

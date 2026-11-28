@@ -83,6 +83,11 @@ jobs:
           grep -q "^package: name='io.github.sebastianeder09.blackoutradar' " angaben.txt
           [ "$(grep -m1 'SHA-256' signatur.txt | awk '{print $NF}')" = e2db975031b745817b82ba1cf9afc48d97acfc40ebd467f40d719ee36b9fe402 ]
           grep -q "^targetSdkVersion:'36'" angaben.txt
+          # Der Name unter dem Symbol bleibt kurz: Ab etwa zwölf Zeichen schneiden ihn viele Startbildschirme ab.
+          label=$(sed -n "s/^application-label:'\(.*\)'$/\1/p" angaben.txt)
+          echo "Name unter dem Symbol: $label"
+          [ -n "$label" ]
+          [ "${#label}" -le 12 ]
           "$tools/aapt2" dump badging apk/blackout-radar-play-test.apk > angaben-play.txt
           head -1 angaben-play.txt
           grep -q "^package: name='at.ase_it.blackoutradar.debug' " angaben-play.txt

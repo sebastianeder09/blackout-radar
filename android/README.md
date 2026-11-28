@@ -88,7 +88,7 @@ Das Thema wirkt wie ein Passwort: Wer es kennt, kann mitlesen und selbst Meldung
 | `../docs/impressum.md`, `../docs/datenschutz.md` | Impressum und Datenschutzerklärung. Sie stehen einmal im Repository und kommen beim Bauen in die App (Ordner `rechtstexte` der Assets). Die App zeigt sie ohne Netz, der Eintrag im Store verweist auf dieselben Dateien |
 | `app/src/main/res/drawable/ic_launcher_*.xml` | App-Symbol als Vektor, abgeleitet vom Logo des Betreibers: heller Grund, darauf die zweigeteilte Pille mit dem Verlauf von Hellblau nach Dunkelblau, darin weiß der Schriftzug. An der Stelle des Spalts zwischen den beiden Hälften steht der Blitz. Die Buchstaben sind Pfade (die Umrisse aus der Vorlage des Logos), weil ein Vektorbild von Android keine Schrift kennt. In der einfarbigen Fassung sind sie ausgespart. Dasselbe Zeichen steht als `LOGO_BIG` in `assets/www/app.js`, für die Kopfzeile gibt es dort das kleine `LOGO` ohne Schrift |
 | `app/src/debug/` | nur im Testbau: Einrichten per `adb` mit Rückmeldung, wie es ausging, Abgleich mit dem Lagebericht auf Zuruf, weitergegebene Nachricht in die Zwischenablage legen, Leseerlaubnis für die Datei mit Thema an `adb`, Ziel des öffentlichen Alarms auf den nachgestellten Server legen, unverschlüsselte Verbindung dorthin, absichtlicher Absturz für die Gegenprobe im Emulator-Test |
-| `test/emulator.sh` | Emulator-Test: fertige App gegen ntfy.sh, Testbau gegen den nachgestellten Server `fake_ntfy.py` mit Testdaten aus dem Planspiel (`fixtures.py`), zuletzt der Testbau der Fassung für Google Play |
+| `test/emulator.sh` | Emulator-Test: fertige App gegen ntfy.sh, Testbau gegen den nachgestellten Server `fake_ntfy.py` mit Testdaten aus dem Planspiel (`fixtures.py`), zuletzt der Testbau der Fassung für Google Play (Leiste, Zahnrad, Zurück-Wege, keine Nennung von GitHub oder ntfy, Name in der Kopfzeile auch bei 360 dp Breite und großer Schrift) |
 | `test/fake_ntfy.py` | stellt ntfy, den Lagebericht und den Radar nach. Dahinter läuft der echte Versand des Radars (`blackout_radar/notify.py`) mit seinem Postausgang, auch an ein öffentliches Thema mit Unterschrift (Testschlüssel). Störungen lassen sich schalten: Radar erreicht ntfy nicht, Handy erreicht ntfy nicht, anderes Thema. Ein „Fremder“ schreibt auf Zuruf Meldungen ohne gültige Unterschrift in das öffentliche Thema |
 | `test/thema_datei.py` | legt das Thema am Rechner in eine Installationsdatei und liest es heraus, mit eigenem Code. Der Emulator-Test vergleicht damit, was das Handy schreibt |
 | `test/seite.py` | liest im Emulator, was die App gerade anzeigt, und kann Knöpfe drücken (über die Entwickler-Schnittstelle der WebView) |
@@ -108,6 +108,11 @@ Dasselbe Programm entsteht in zwei Fassungen (`productFlavors` in `app/build.gra
 | Signatur | offener Schlüssel (siehe unten) | Upload-Schlüssel (siehe unten), für die Handys signiert Google |
 | Neue Versionen | die App fragt bei GitHub nach | über den Store, die App fragt nicht selbst |
 | Weitergabe als Datei samt Thema | ja | nein, Google signiert die Datei am Handy neu |
+| Leiste unten | Lage, Meldungen, App, Über uns | nur Lage und Meldungen. Die Einstellungen liegen hinter dem Zahnrad oben rechts, „Über uns“ hinter dem Namen in der Kopfzeile, aktualisiert wird beim Stand des Lageberichts |
+| Eigener Radar (eigenes Thema) | ja | wird nicht angeboten |
+| Fremde Dienste beim Namen (GitHub, ntfy) | ja, mit Verweisen dorthin | nur in der Datenschutzerklärung, keine Verweise |
+
+Unter dem Symbol am Startbildschirm heißt die App in beiden Fassungen „Blackout“ (`app_name`), weil viele Handys dort längere Namen abschneiden. In der App und im Store heißt sie „Blackout-Radar“. Die Kopfzeile zeigt den Namen immer ganz: Wird es eng (schmales Handy, große Schrift), wird seine Schrift kleiner, und das Wort neben dem Punkt der Verbindung weicht (`fitHeader` in `app.js`).
 
 Beide Dateien hängen an jeder Veröffentlichung unter *Releases*. Das Paket für Google Play lässt sich nicht am Handy installieren, es wird in der Play Console hochgeladen. Ziel ist Android 16 (API 36), lauffähig ist die App ab Android 8.
 

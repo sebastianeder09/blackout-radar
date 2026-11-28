@@ -20,6 +20,7 @@
     revM: -1,
     revS: -1,
     tab: 'lage',
+    trail: [],         // Play: Seiten, über die man zur offenen Unterseite kam. Zurück führt dorthin.
     scroll: {},
     open: loadOpen(),  // offene Abschnitte des Lageberichts
     expanded: new Set(),
@@ -52,6 +53,7 @@
     share: '<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></svg>',
     back: '<svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>',
     firma: '<svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>',
+    gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
     globe: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>',
     call: '<svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z"/></svg>',
     mail: '<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>',
@@ -75,6 +77,11 @@
 
   const LEVEL_NAME = { alarm: 'Alarm', warn: 'Warnung', ok: 'Entwarnung', info: 'Meldung', daily: 'Übersicht' };
   const TABS = ['lage', 'meldungen', 'app', 'firma'];
+  // Die Fassung aus dem Play Store führt in der Leiste unten nur Lage und Meldungen. Die Einstellungen ("app") und
+  // "Über uns" ("firma") sind dort Unterseiten: Das Zahnrad und der Name in der Kopfzeile führen hin, Zurück führt zur
+  // Lage. Fremde Dienste nennt diese Fassung nicht beim Namen, außer in der Datenschutzerklärung.
+  const BAR_PLAY = ['lage', 'meldungen'];
+  const TAB_LABEL = { lage: ['Lage', 'lage'], meldungen: ['Meldungen', 'bell'], app: ['App', 'phone'], firma: ['Über uns', 'firma'] };
   const LEGAL_TITLE = { impressum: 'Impressum', datenschutz: 'Datenschutz' };
   const OPEN_DEFAULT = { 'Laufende Ereignisse': true, 'Kürzlich beendet': true };
 
@@ -277,15 +284,16 @@
       c === 'waiting' ? ['alarm', 'Getrennt'] : ['alarm', 'Aus'];
     sh.pill.className = 'pill ' + pill[0];
     sh.pill.textContent = '';
-    add(sh.pill, [el('span', { class: 'dot' }), pill[1]]);
-    sh.refresh.classList.toggle('spin', !!st.status.loading);
+    sh.pill.setAttribute('aria-label', 'Verbindung: ' + pill[1]);
+    add(sh.pill, [el('span', { class: 'dot' }), el('span', { class: 'label', text: pill[1] })]);
+    if (sh.refresh) sh.refresh.classList.toggle('spin', !!st.status.loading);
 
-    // Punkt am Tab "App", wenn dort etwas zu tun ist
-    const todo = !st.perms.notifications || !st.perms.battery || st.perms.alarmMuted || st.update.available;
+    // Punkt am Tab "App" (Play: am Zahnrad), wenn dort etwas zu tun ist
+    const todo = permsMissing(st) || st.update.available;
     sh.appDot.hidden = !todo;
 
     for (const name of TABS) {
-      sh.tabs[name].setAttribute('aria-selected', String(S.tab === name));
+      if (sh.tabs[name]) sh.tabs[name].setAttribute('aria-selected', String(S.tab === name));
       sh.views[name].hidden = S.tab !== name;
     }
     if (S.tab === 'lage') renderLage(sh.views.lage);
@@ -293,48 +301,97 @@
     else if (S.tab === 'firma') renderFirma(sh.views.firma);
     else renderApp(sh.views.app);
     armBack();
+    fitHeader();
   }
+
+  /** Fehlt etwas, damit Alarme sicher ankommen: eine Erlaubnis, oder der Kanal "Alarm" ist in Android ausgeschaltet? */
+  const permsMissing = st => !st.perms.notifications || !st.perms.battery || st.perms.alarmMuted;
 
   function buildShell() {
     document.body.classList.remove('setup-mode');
     app.textContent = '';
     const sh = { views: {}, tabs: {} };
+    const play = !!S.st.play;
     sh.pill = el('button', { class: 'pill', onclick: () => showTab('app'), 'aria-label': 'Verbindung' });
-    sh.refresh = el('button', { class: 'icon-btn', 'aria-label': 'Aktualisieren', onclick: onRefresh }, icon('refresh'));
-    const top = el('header', { class: 'top' },
-      el('div', { class: 'brand', html: LOGO },
-        el('div', { class: 'brand-text' }, el('h1', { text: 'Blackout-Radar' }),
-          brandName() ? el('span', { class: 'by', text: 'von ' + brandName() }) : null)),
-      sh.pill, sh.refresh);
+    // Play: Aktualisiert wird auf der Seite "Lage", beim Stand des Lageberichts. So bleibt neben dem Namen Platz.
+    sh.refresh = play ? null : el('button', { class: 'icon-btn', 'aria-label': 'Aktualisieren', onclick: onRefresh }, icon('refresh'));
+    sh.appDot = el('span', { class: 'badge-dot', hidden: true });
+    sh.title = el('h1', { text: 'Blackout-Radar' });
+    const name = el('div', { class: 'brand-text' }, sh.title,
+      brandName() ? el('span', { class: 'by', text: 'von ' + brandName() }) : null);
+    // Play: Der Name führt zu "Über uns", das Zahnrad zu den Einstellungen.
+    const brand = play ? el('button', { id: 'brand', class: 'brand', html: LOGO, onclick: () => showTab('firma') }, name)
+      : el('div', { class: 'brand', html: LOGO }, name);
+    const gear = play ? el('button', { id: 'settings', class: 'icon-btn', 'aria-label': 'Einstellungen', onclick: () => showTab('app') },
+      icon('gear'), sh.appDot) : null;
+    sh.top = el('header', { class: 'top' }, brand, sh.pill, sh.refresh, gear);
     const main = el('main');
-    for (const name of TABS) {
-      sh.views[name] = el('section', { class: 'view', 'aria-label': name });
-      main.append(sh.views[name]);
+    for (const view of TABS) {
+      sh.views[view] = el('section', { class: 'view', 'aria-label': view });
+      main.append(sh.views[view]);
     }
     const nav = el('nav', { class: 'tabs' });
-    const tab = (name, label, ico) => {
-      const b = el('button', { onclick: () => showTab(name), 'aria-selected': 'false' }, icon(ico), el('span', { text: label }));
-      sh.tabs[name] = b;
+    for (const tab of play ? BAR_PLAY : TABS) {
+      const b = el('button', { onclick: () => showTab(tab), 'aria-selected': 'false' }, icon(TAB_LABEL[tab][1]), el('span', { text: TAB_LABEL[tab][0] }));
+      sh.tabs[tab] = b;
       nav.append(b);
-      return b;
-    };
-    tab('lage', 'Lage', 'lage');
-    tab('meldungen', 'Meldungen', 'bell');
-    tab('app', 'App', 'phone');
-    tab('firma', 'Über uns', 'firma');
-    sh.appDot = el('span', { class: 'badge-dot', hidden: true });
-    sh.tabs.app.append(sh.appDot);
-    app.append(top, main, nav);
+    }
+    if (!play) sh.tabs.app.append(sh.appDot);
+    app.append(sh.top, main, nav);
     S.shell = sh;
   }
 
+  /**
+   * Der Name der App steht in der Kopfzeile immer ganz da, auch auf schmalen Handys und mit großer Schrift
+   * (Android vergrößert die Schrift der Seite mit der Schriftgröße des Handys). Wird es eng, wird zuerst die
+   * Schrift des Namens etwas kleiner. Reicht das nicht, weicht das Wort neben dem Punkt der Verbindung, und
+   * der Name schrumpft weiter. --fit ist der Faktor für die Schriftgröße des Namens (app.css).
+   */
+  function fitHeader() {
+    const sh = S.shell;
+    if (!sh) return;
+    const cut = () => sh.title.scrollWidth > sh.title.clientWidth + 1;
+    const shrink = least => {
+      for (let fit = 1; cut() && fit > least + 0.001;) {
+        fit -= 0.05;
+        sh.top.style.setProperty('--fit', fit.toFixed(2));
+      }
+      return !cut();
+    };
+    sh.top.classList.remove('tight');
+    sh.top.style.removeProperty('--fit');
+    if (shrink(0.85)) return;
+    sh.top.style.removeProperty('--fit');
+    sh.top.classList.add('tight');
+    shrink(0.65);
+  }
+
+  /** Play: Einstellungen und "Über uns" sind Unterseiten. Oben steht, wo man ist, der Pfeil führt eine Ebene zurück. */
+  function subhead(title) {
+    return el('div', { class: 'subhead' },
+      el('button', { class: 'icon-btn', 'aria-label': 'Zurück', onclick: goBack }, icon('back')),
+      el('h2', { text: title }));
+  }
+
   function showTab(name) {
-    if (!S.shell) { S.tab = name; return; }
+    if (!S.shell) { S.tab = name; S.trail = []; return; }
     if (name === S.tab) { window.scrollTo(0, 0); return; }
     S.scroll[S.tab] = window.scrollY;
+    // Play: Eine Unterseite merkt sich, von wo sie geöffnet wurde. Ein Tab der Leiste beginnt von vorn.
+    if (!S.st.play || BAR_PLAY.indexOf(name) >= 0) S.trail = [];
+    else {
+      const at = S.trail.indexOf(name);
+      if (at >= 0) S.trail.length = at;
+      else S.trail.push(S.tab);
+    }
     S.tab = name;
     renderMain();
     window.scrollTo(0, S.scroll[name] || 0);
+  }
+
+  /** Eine Ebene zurück. Play: aus einer Unterseite dorthin, von wo sie geöffnet wurde. Sonst zur Lage. */
+  function goBack() {
+    showTab(S.trail.length ? S.trail[S.trail.length - 1] : 'lage');
   }
 
   function onRefresh() {
@@ -350,13 +407,17 @@
     const s = S.status;
     const st = S.st;
     const now = Date.now();
+    // Play: Der Knopf zum Aktualisieren steht hier beim Stand des Lageberichts, nicht in der Kopfzeile.
+    const reload = () => st.play ? el('button', { id: 'reload', class: 'icon-btn hero-reload' + (st.status.loading ? ' spin' : ''),
+      'aria-label': 'Aktualisieren', onclick: onRefresh }, icon('refresh')) : null;
     if (!s) {
       v.append(el('div', { class: 'hero info' },
         el('div', { class: 'hero-head' },
           el('span', { class: 'hero-icon' }, icon(st.status.loading ? 'refresh' : 'info', st.status.loading ? 'spin' : '')),
-          el('div', null,
+          el('div', { class: 'hero-text' },
             el('h2', { text: st.status.loading ? 'Lagebericht wird geladen …' : 'Noch kein Lagebericht' }),
-            el('div', { class: 'stand', text: st.status.error || 'Er erscheint, sobald das Handy online ist.' })))));
+            el('div', { class: 'stand', text: st.status.error || 'Er erscheint, sobald das Handy online ist.' })),
+          st.status.loading ? null : reload())));
       return;
     }
 
@@ -377,7 +438,8 @@
     if (st.status.loading) stand += ' · wird aktualisiert';
     hero.append(el('div', { class: 'hero-head' },
       el('span', { class: 'hero-icon' }, icon(active.length || (silent && !stale) ? 'alert' : 'shield')),
-      el('div', null, el('h2', { text: title }), el('div', { class: 'stand', text: stand }))));
+      el('div', { class: 'hero-text' }, el('h2', { text: title }), el('div', { class: 'stand', text: stand })),
+      reload()));
     if (active.length) {
       const list = el('ul', { class: 'events' });
       for (const ev of active) {
@@ -389,6 +451,18 @@
       hero.append(list);
     }
     v.append(hero);
+
+    // Play: Die Einstellungen liegen hinter dem Zahnrad. Fehlt etwas, damit Alarme sicher ankommen, steht es deshalb auch hier.
+    if (st.play && permsMissing(st)) {
+      const p = st.perms;
+      v.append(note('warn', 'alert', [
+        el('p', null, el('b', { text: 'So kommen Alarme nicht sicher an.' }),
+          (p.notifications ? '' : ' Benachrichtigungen sind nicht erlaubt.') +
+          (p.battery ? '' : ' Die Akku-Optimierung trennt die Verbindung, wenn das Handy ruht.') +
+          (p.alarmMuted ? ' Der Kanal „Alarm“ ist in Android ausgeschaltet.' : '')),
+        el('div', { class: 'note-actions' },
+          el('button', { id: 'fix', class: 'btn', onclick: () => showTab('app') }, 'Einstellungen öffnen'))]));
+    }
 
     if (st.status.error) {
       v.append(note('info', 'wifi', st.status.error + ' Gezeigt wird der Stand von ' + when(generated, now) + '.'));
@@ -428,7 +502,7 @@
 
     v.append(el('div', { class: 'foot' },
       el('div', { text: 'Lagebericht des Blackout-Radars, alle 5 Minuten neu.' }),
-      el('button', { onclick: () => N.openUrl(statusUrl()) }, 'Bei GitHub öffnen'),
+      st.play ? null : el('button', { onclick: () => N.openUrl(statusUrl()) }, 'Bei GitHub öffnen'),
       byline()));
   }
 
@@ -508,6 +582,14 @@
             continue;
           }
           title = 'Laufende Ereignisse';
+        }
+        // Play: Was der Radar auf welchem Weg verschickt hat, ist für seinen Betrieb gedacht. Die App führt ihre
+        // eigene Liste unter "Meldungen".
+        if (title === 'Letzte Meldungen' && S.st.play) {
+          i++;
+          while (i < lines.length && !/^## /.test(lines[i])) i++;
+          body = null;
+          continue;
         }
         body = section(v, title);
         target = null;
@@ -628,7 +710,7 @@
     const now = Date.now();
     const st = S.st;
     if (st.conn.state !== 'connected') {
-      v.append(note('warn', 'wifi', 'Gerade keine Verbindung zu ntfy. Was in der Zwischenzeit kommt, ' +
+      v.append(note('warn', 'wifi', 'Gerade keine Verbindung ' + (st.play ? 'zum Push-Dienst' : 'zu ntfy') + '. Was in der Zwischenzeit kommt, ' +
         'holt die App nach, sobald die Verbindung wieder steht.' +
         // Der Notweg läuft nur, wenn der Radar seine Meldungen im Lagebericht führt.
         (st.fallback && st.fallback.ready ? ' Bis dahin sieht sie alle paar Minuten im Lagebericht nach (Notweg).' : '')));
@@ -690,11 +772,14 @@
 
   // -------------------------------------------------------------------- App
 
+  /** Der Tab "App". In der Fassung aus dem Play Store ist das die Unterseite "Einstellungen" hinter dem Zahnrad. */
   function renderApp(v) {
     v.textContent = '';
     const st = S.st;
     const c = st.conn;
     const now = Date.now();
+    const play = !!st.play;
+    if (play) v.append(subhead('Einstellungen'));
 
     // Verbindung
     const state = {
@@ -720,9 +805,11 @@
         el('button', { class: 'btn', onclick: () => { N.reconnect(); toast('Verbindung wird neu aufgebaut …'); } }, icon('refresh'), 'Jetzt neu verbinden')),
       more('notweg', 'Was ist der Notweg?',
         el('ul', null,
-          el('li', { text: 'Der Radar führt im Lagebericht bei GitHub, welche Meldungen er verschickt hat. Die App vergleicht das etwa alle 15 Minuten mit dem, was über ntfy angekommen ist. Erreicht sie ntfy nicht, sieht sie etwa alle 5 Minuten nach.' }),
+          el('li', { text: play
+            ? 'Der Radar führt in seinem Lagebericht, welche Meldungen er verschickt hat. Die App vergleicht das etwa alle 15 Minuten mit dem, was als Push angekommen ist. Erreicht sie den Push-Dienst nicht, sieht sie etwa alle 5 Minuten nach.'
+            : 'Der Radar führt im Lagebericht bei GitHub, welche Meldungen er verschickt hat. Die App vergleicht das etwa alle 15 Minuten mit dem, was über ntfy angekommen ist. Erreicht sie ntfy nicht, sieht sie etwa alle 5 Minuten nach.' }),
           el('li', { text: 'Fehlt eine Meldung, holt die App sie aus dem Lagebericht und meldet sich selbst, mit derselben Dringlichkeit. In der Liste trägt sie dann das Kennzeichen „Notweg“.' }),
-          el('li', { text: 'Das hilft, wenn ntfy ausfällt' + (st.public ? ' oder wenn der Radar dort nichts loswird.'
+          el('li', { text: 'Das hilft, wenn ' + (play ? 'der Push-Dienst' : 'ntfy') + ' ausfällt' + (st.public ? ' oder wenn der Radar dort nichts loswird.'
             : ', wenn der Radar dort nichts loswird oder wenn das Thema an diesem Handy nicht stimmt.') +
             ' Der Notweg ist langsamer als der Push: meist einige Minuten, im ungünstigen Fall rund 20 Minuten. Ohne Internet am Handy hilft auch er nicht.' }))),
       st.public ? more('schutz', 'Kann jemand einen falschen Alarm schicken?',
@@ -814,12 +901,16 @@
         st.play ? null : u.available
           ? el('button', { class: 'btn primary', onclick: () => N.downloadUpdate() }, 'Neue Version herunterladen')
           : el('button', { class: 'btn', onclick: () => { N.checkUpdate(); toast('Suche nach neuer Version …'); } }, 'Nach neuer Version suchen'),
-        el('button', { class: 'btn', onclick: () => N.openUrl(statusUrl()) }, 'Lagebericht bei GitHub', icon('ext')),
-        st.public ? el('button', { class: 'btn', onclick: askOwn }, 'Eigenen Radar verbinden') : null,
+        play ? null : el('button', { class: 'btn', onclick: () => N.openUrl(statusUrl()) }, 'Lagebericht bei GitHub', icon('ext')),
+        // Play: Wer den Dienst anbietet, steht hinter dem Namen in der Kopfzeile und hier.
+        play && brandName() ? el('button', { id: 'about', class: 'btn', onclick: () => showTab('firma') }, 'Über ' + brandName()) : null,
+        // Einen eigenen Radar verbindet nur, wer selbst einen betreibt. Die Fassung aus dem Play Store bietet das nicht an.
+        st.public && !play ? el('button', { class: 'btn', onclick: askOwn }, 'Eigenen Radar verbinden') : null,
         el('button', { class: 'btn danger', onclick: st.public ? askOff : askReset }, st.public ? 'Alarm ausschalten' : 'Thema ändern')),
       legalLinks()));
 
-    v.append(el('div', { class: 'foot', text: 'ntfy.sh hebt Meldungen 12 Stunden auf. War das Handy länger ohne Netz, fehlen ältere Meldungen hier. Der Lagebericht zeigt trotzdem den aktuellen Stand.' }));
+    v.append(el('div', { class: 'foot', text: (play ? 'Der Push-Dienst' : 'ntfy.sh') + ' hebt Meldungen 12 Stunden auf. War das Handy länger ohne Netz, fehlen ältere Meldungen ' +
+      (play ? 'in der Liste' : 'hier') + '. Der Lagebericht zeigt trotzdem den aktuellen Stand.' }));
   }
 
   /** Stand des Notwegs in wenigen Worten, für die Karte der Verbindung. */
@@ -931,7 +1022,8 @@
     if (!document.getElementById('enable')) {
       root.textContent = '';
       const point = (ico, title, text) => el('li', null, icon(ico), el('div', null, el('b', { text: title }), el('span', { text: text })));
-      root.append(
+      // add() lässt aus, was fehlt (den Weg zum eigenen Radar). root.append() schriebe dafür das Wort "null" in die Seite.
+      add(root, [
         el('div', { class: 'brand-big', html: LOGO_BIG },
           el('div', null, el('b', { text: 'Blackout-Radar' }),
             brandName() ? el('span', { class: 'by', text: 'von ' + brandName() }) : null)),
@@ -944,10 +1036,11 @@
           point('shield', 'Ohne Konto, ohne Standort', 'Die App fragt nichts ab und verfolgt nichts.')),
         el('button', { id: 'enable', class: 'btn primary block big', onclick: enablePublic }, 'Alarm einschalten'),
         el('div', { id: 'setup-msg', class: 'msg-line' }),
-        el('button', { id: 'own', class: 'link-btn block', onclick: openPrivate }, 'Eigenen Radar verbinden'),
+        // Einen eigenen Radar verbindet nur, wer selbst einen betreibt. Die Fassung aus dem Play Store bietet das nicht an.
+        S.st.play ? null : el('button', { id: 'own', class: 'link-btn block', onclick: openPrivate }, 'Eigenen Radar verbinden'),
         el('p', { class: 'fine', text: 'Der Blackout-Radar ist kein amtlicher Warndienst. Er wertet öffentliche Messdaten aus und kann ' +
           'sich irren oder ausfallen. Für Alarme braucht das Handy Internet.' }),
-        legalLinks());
+        legalLinks()]);
     }
     updateWelcome();
   }
@@ -959,7 +1052,8 @@
     const busy = S.setup.busy;
     btn.disabled = busy;
     btn.textContent = busy ? 'Schalte ein …' : 'Alarm einschalten';
-    document.getElementById('own').disabled = busy;
+    const own = document.getElementById('own');
+    if (own) own.disabled = busy;
     msg.className = 'msg-line ' + (S.setup.error ? 'error' : 'info');
     msg.textContent = S.setup.error || '';
   }
@@ -1122,6 +1216,7 @@
     S.setup = { busy: false, error: '', result: null, value: '', fromLink: false };
     S.page = 'welcome';
     S.tab = 'lage';
+    S.trail = [];
     render();
     window.scrollTo(0, 0);
   }
@@ -1132,7 +1227,9 @@
   function renderFirma(v) {
     if (v.firstChild) return;  // der Inhalt ändert sich nicht, solange die App läuft
     const b = S.st.brand || {};
+    const play = !!S.st.play;
     const service = text => el('li', { text: text });
+    if (play) v.append(subhead('Über uns'));
     v.append(
       el('div', { class: 'firma-hero' },
         el('div', { class: 'firma-logo', html: LOGO_BIG }),
@@ -1194,7 +1291,7 @@
           el('li', { text: 'Der Blackout-Radar ist kein amtlicher Warndienst und ersetzt keine Warnung der Behörden. Er wertet öffentliche ' +
             'Messdaten aus und kann sich irren oder ausfallen.' }),
           el('li', { text: 'Alarme brauchen Internet am Handy. Bei einem langen Stromausfall fällt auch das Mobilfunknetz nach einiger Zeit aus.' }),
-          el('li', null, 'Der Quelltext von Radar und App ist offen: ',
+          play ? null : el('li', null, 'Der Quelltext von Radar und App ist offen: ',
             el('a', { href: '#', onclick: e => { e.preventDefault(); N.openUrl('https://github.com/' + S.st.repo); } }, 'bei GitHub ansehen'), '.')),
         legalLinks()));
   }
@@ -1318,14 +1415,14 @@
       if (TABS.indexOf(name) < 0) return;
       S.legal = null;
       // Ein Tipp auf eine Benachrichtigung beendet auch die Erfolgsseite nach dem Einrichten.
-      if (S.setup.result && S.st && S.st.hasTopic) { S.setup.result = null; S.tab = name; render(); return; }
+      if (S.setup.result && S.st && S.st.hasTopic) { S.setup.result = null; S.tab = name; S.trail = []; render(); return; }
       renderLegal();
       showTab(name);
     },
     back() {
       if (S.modal) { closeModal(); return true; }
       if (S.legal) { closeLegal(); return true; }
-      if (S.shell && S.tab !== 'lage') { showTab('lage'); return true; }
+      if (S.shell && S.tab !== 'lage') { goBack(); return true; }
       if (!S.shell && canLeavePrivate()) { closePrivate(); return true; }
       return false;
     },
@@ -1414,6 +1511,7 @@
   // Zeiten wie "vor 3 min" und der Countdown bis zum nächsten Versuch bleiben aktuell.
   setInterval(() => { if (S.st && S.shell && S.tab !== 'meldungen' && S.tab !== 'firma') renderMain(); }, 20000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+  window.addEventListener('resize', fitHeader);
 
   refresh();
 })();

@@ -257,16 +257,21 @@ object Fallback {
 
     /**
      * Der Grund in Worten, für die Benachrichtigung und die Liste der Meldungen. Beim öffentlichen Alarm
-     * ([public]) kann das Thema am Handy nicht falsch sein, dort lautet der dritte Grund anders.
+     * ([public]) kann das Thema am Handy nicht falsch sein, dort lautet der dritte Grund anders. Die Fassung
+     * aus dem Play Store ([play]) nennt den Dienst, über den die Meldungen kommen, nicht beim Namen.
      */
-    fun reason(via: String, public: Boolean = false): String = when (via) {
-        "" -> ""
-        VIA_RADAR -> "Über den Notweg aus dem Lagebericht. Der Radar konnte diese Meldung nicht an ntfy übergeben."
-        VIA_NET -> "Über den Notweg aus dem Lagebericht. ntfy war von diesem Handy aus nicht erreichbar."
-        VIA_TOPIC -> if (public) "Über den Notweg aus dem Lagebericht. ntfy hat geantwortet, die Meldung lag dort aber nicht vor."
-            else "Über den Notweg aus dem Lagebericht. ntfy hat geantwortet, unter dem Thema dieses Handys lag die " +
-                "Meldung dort aber nicht. Kommt das öfter vor, stimmt das Thema nicht mit dem des Radars überein."
-        else -> "Über den Notweg aus dem Lagebericht."
+    fun reason(via: String, public: Boolean = false, play: Boolean = BuildConfig.PLAY): String {
+        val push = if (play) "Der Push-Dienst" else "ntfy"
+        return when (via) {
+            "" -> ""
+            VIA_RADAR -> "Über den Notweg aus dem Lagebericht. Der Radar konnte diese Meldung nicht an " +
+                (if (play) "den Push-Dienst" else "ntfy") + " übergeben."
+            VIA_NET -> "Über den Notweg aus dem Lagebericht. $push war von diesem Handy aus nicht erreichbar."
+            VIA_TOPIC -> if (public) "Über den Notweg aus dem Lagebericht. $push hat geantwortet, die Meldung lag dort aber nicht vor."
+                else "Über den Notweg aus dem Lagebericht. $push hat geantwortet, unter dem Thema dieses Handys lag die " +
+                    "Meldung dort aber nicht. Kommt das öfter vor, stimmt das Thema nicht mit dem des Radars überein."
+            else -> "Über den Notweg aus dem Lagebericht."
+        }
     }
 
     // ------------------------------------------------------------------ Ablauf

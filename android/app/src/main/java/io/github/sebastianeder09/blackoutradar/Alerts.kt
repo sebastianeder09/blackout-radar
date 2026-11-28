@@ -105,7 +105,9 @@ object Alerts {
         val ageMs = nowMs - notice.time * 1000L
         val channel = channelFor(notice.priority, store.loudAlarm, ageMs)
         val late = ageMs > 20 * 60_000L
-        val body = if (late) "Verspätet angekommen (${MonitorWatch.age(ageMs)}).\n${notice.message}" else notice.message
+        var body = if (late) "Verspätet angekommen (${MonitorWatch.age(ageMs)}).\n${notice.message}" else notice.message
+        // Kam die Meldung über den Notweg, steht der Grund am Schluss. Vorn bleibt, was passiert ist.
+        if (notice.fallback) body += "\n\n" + Fallback.reason(notice.via)
         val builder = Notification.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat_bolt)
             .setContentTitle(Ntfy.displayTitle(notice))

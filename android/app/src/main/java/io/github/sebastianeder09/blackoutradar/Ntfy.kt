@@ -9,7 +9,11 @@ import java.net.URLEncoder
 /** Wohin die App sich verbindet: Server und Thema. */
 data class Target(val server: String, val topic: String)
 
-/** Eine Meldung, wie ntfy sie liefert. [time] in Sekunden seit 1970. */
+/**
+ * Eine Meldung, wie ntfy sie liefert. [time] in Sekunden seit 1970.
+ * [via] ist leer, wenn sie über ntfy kam. Sonst nennt es den Grund, aus dem die App sie
+ * über den Notweg aus dem Lagebericht geholt hat, siehe [Fallback].
+ */
 data class Notice(
     val id: String,
     val time: Long,
@@ -18,6 +22,7 @@ data class Notice(
     val priority: Int,
     val tags: List<String>,
     val click: String,
+    val via: String = "",
 ) {
     /** alarm | warn | ok | info | daily, so wie der Radar die Meldung eingestuft hat. */
     val level: String
@@ -29,6 +34,9 @@ data class Notice(
             else -> "daily"
         }
 
+    /** Wahr, wenn die Meldung nicht über ntfy kam, sondern über den Notweg. */
+    val fallback: Boolean get() = via.isNotEmpty()
+
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
         .put("time", time)
@@ -37,6 +45,7 @@ data class Notice(
         .put("priority", priority)
         .put("tags", JSONArray(tags))
         .put("click", click)
+        .put("via", via)
 
     companion object {
         fun fromJson(json: JSONObject): Notice? {
@@ -58,6 +67,7 @@ data class Notice(
                 priority = json.optInt("priority", 3).coerceIn(1, 5),
                 tags = tags,
                 click = text(json, "click"),
+                via = text(json, "via"),
             )
         }
 
@@ -166,14 +176,22 @@ object Ntfy {
         else "$LINK_PREFIX?thema=" + URLEncoder.encode(plain(target), "UTF-8")
 
     /**
-     * Nachricht zum Weitergeben an ein weiteres Handy. Wer sie dort kopiert und in der App
-     * auf "Einfügen" tippt, ist eingerichtet: [parseTarget] findet den Link im Text.
+     * Nachricht zum Weitergeben an ein weiteres Handy. Wer sie dort kopiert und die App öffnet, findet das
+     * Thema schon im Feld ([sharedTarget]) und tippt nur noch auf "Verbinden".
      */
     fun shareText(target: Target, downloadUrl: String): String =
         "Blackout-Radar: Alarm aufs Handy bei einem großen Stromausfall.\n\n" +
             "1. App herunterladen und installieren:\n$downloadUrl\n\n" +
-            "2. Diese ganze Nachricht kopieren, die App öffnen und auf „Einfügen“ tippen.\n\n" +
+            "2. Diese ganze Nachricht kopieren und die App öffnen. Sie trägt das Thema selbst ein, " +
+            "du tippst nur noch auf „Verbinden“.\n\n" +
             link(target)
+
+    /**
+     * Das Ziel aus einer weitergegebenen Nachricht ([shareText]), wie sie in der Zwischenablage liegt. Es zählt
+     * nur der Link der App, der Rest ist Anleitung. Anderer Text ergibt nichts, auch ein bloßer Themenname
+     * oder eine Adresse: Was der Mensch sonst kopiert hat, geht die App nichts an.
+     */
+    fun sharedTarget(text: String, allowHttp: Boolean = false): Target? = findLink(text)?.let { parseLink(it, allowHttp) }
 
     /** Dauerverbindung: liefert zuerst alles seit [since], danach jede neue Meldung sofort. */
     fun streamUrl(target: Target, since: String): String = "${target.server}/${target.topic}/json?since=$since"
@@ -191,7 +209,8 @@ object Ntfy {
         return when (json.optString("event")) {
             "open" -> StreamEvent.Open
             "keepalive" -> StreamEvent.Keepalive
-            "message" -> Notice.fromJson(json)?.let { StreamEvent.Message(it) } ?: StreamEvent.Other
+            // Was über ntfy kommt, kam nie über den Notweg, egal was in der Zeile steht.
+            "message" -> Notice.fromJson(json)?.let { StreamEvent.Message(it.copy(via = "")) } ?: StreamEvent.Other
             else -> StreamEvent.Other
         }
     }

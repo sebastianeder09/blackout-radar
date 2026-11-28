@@ -73,4 +73,34 @@ class MessageLogTest {
         assertEquals(0, MessageLog(file).all().size)
         assertTrue(log.add(notice("a", 1)))
     }
+
+    @Test
+    fun zustellungErsetztDenEintragDesNotwegs() {
+        val log = MessageLog(folder.newFile("m.json"))
+        log.add(notice("alt", 5))
+        log.add(notice("notweg:20:e1", 20).copy(via = "radar"))
+        // Dieselbe Meldung kommt doch noch über ntfy: Sie tritt an die Stelle des Eintrags.
+        assertTrue(log.replace("notweg:20:e1", notice("ntfy1", 25)))
+        assertEquals(listOf("ntfy1", "alt"), log.all().map { it.id })
+        assertFalse(log.all().any { it.fallback })
+        // Kommt sie ein zweites Mal, ändert sich nichts mehr, und ein anderer Eintrag bleibt stehen.
+        log.add(notice("notweg:30:e2", 30).copy(via = "netz"))
+        assertFalse(log.replace("notweg:30:e2", notice("ntfy1", 25)))
+        assertEquals(listOf("notweg:30:e2", "ntfy1", "alt"), log.all().map { it.id })
+        // Ein Eintrag, den es nicht gibt, stört nicht.
+        assertTrue(log.replace("gibt-es-nicht", notice("ntfy2", 40)))
+        assertEquals(4, log.all().size)
+    }
+
+    @Test
+    fun wegBleibtNachNeustartErhalten() {
+        val file = folder.newFile("m.json")
+        MessageLog(file).apply {
+            add(notice("a", 10))
+            add(notice("notweg:20:e1", 20).copy(via = "thema"))
+        }
+        val again = MessageLog(file).all()
+        assertEquals(listOf("thema", ""), again.map { it.via })
+        assertEquals(listOf(true, false), again.map { it.fallback })
+    }
 }

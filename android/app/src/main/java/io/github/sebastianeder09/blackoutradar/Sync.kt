@@ -7,7 +7,8 @@ import java.io.IOException
 object Sync {
     class SetupResult(val ok: Boolean, val error: String = "", val count: Int = 0, val offline: Boolean = false)
 
-    private val setupLock = Any()
+    /** Schützt alles, was die Liste der Meldungen umbaut: Einrichten, Nachholen, Zustellen und den Notweg. */
+    internal val lock = Any()
 
     /**
      * Übernimmt das Thema, lädt still, was der Server aus den letzten Stunden noch hat,
@@ -29,7 +30,7 @@ object Sync {
         } catch (e: IOException) {
             offline = true
         }
-        synchronized(setupLock) {
+        synchronized(lock) {
             store.target = target
             store.log.clear()
             store.sinceTime = nowSeconds
@@ -47,7 +48,7 @@ object Sync {
     /** Vergisst das Thema und alle Meldungen und beendet die Verbindung. */
     fun reset(context: Context) {
         val store = Store.get(context)
-        synchronized(setupLock) {
+        synchronized(lock) {
             store.target = null
             store.lastId = null
             store.historyPending = false
@@ -97,7 +98,7 @@ object Sync {
             return false
         }
         var added = 0
-        synchronized(setupLock) {
+        synchronized(lock) {
             // Wurde inzwischen neu eingerichtet oder zurückgesetzt, gehört die Antwort nicht mehr hierher.
             if (!store.historyPending || store.target != target || store.sinceTime != setupTime) return true
             for (notice in History.before(notices, setupTime)) if (store.log.add(notice)) added++
@@ -107,15 +108,29 @@ object Sync {
         return true
     }
 
-    /** Nimmt eine Meldung auf und zeigt sie an, falls sie neu ist. */
+    /**
+     * Nimmt eine Meldung von ntfy auf und zeigt sie an, falls sie neu ist.
+     *
+     * Hat die App dieselbe Meldung schon über den Notweg gezeigt (siehe [Fallback]), ersetzt die
+     * Zustellung von ntfy diesen Eintrag still: Geläutet hat es dafür schon.
+     */
     fun deliver(context: Context, notice: Notice): Boolean {
         val store = Store.get(context)
-        val fresh = store.log.add(notice)
-        store.lastId = notice.id
-        if (fresh) {
-            Alerts.show(context, notice)
-            AppState.messagesChanged()
+        var fresh = false
+        var alert = false
+        synchronized(lock) {
+            val log = store.log.all()
+            val twin = if (log.any { it.fallback }) Fallback.twin(log, notice, Fallback.zone(StatusRepo.cachedJson(store))) else null
+            if (twin != null) {
+                fresh = store.log.replace(twin.id, notice)
+            } else {
+                fresh = store.log.add(notice)
+                alert = fresh
+            }
+            store.lastId = notice.id
         }
+        if (alert) Alerts.show(context, notice)
+        if (fresh) AppState.messagesChanged()
         return fresh
     }
 

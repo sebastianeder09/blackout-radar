@@ -165,6 +165,10 @@ class ListenerService : Service() {
                 disconnectedSince = System.currentTimeMillis()
                 // War die Verbindung eine Weile stabil, beginnen die Wartezeiten wieder klein.
                 if (SystemClock.elapsedRealtime() - startedAt > 60_000L) attempt = 0
+            } else if (System.currentTimeMillis() - disconnectedSince >= FALLBACK_AFTER_MS) {
+                // ntfy ist nicht nur für einen Augenblick weg. Der Lagebericht bei GitHub geht vielleicht noch:
+                // Steht dort eine Meldung, die hier fehlt, zeigt die App sie selbst an (Notweg).
+                Watchdog.checkStatusAside(this)
             }
             attempt++
             val delay = Backoff.delayMs(attempt, outcome.rateLimited, Math.random())
@@ -325,6 +329,13 @@ class ListenerService : Service() {
 
         /** So lange ohne Lebenszeichen, dann gilt eine Verbindung als tot. */
         const val STALE_AFTER_MS = 4 * 60_000L
+
+        /**
+         * So lange ohne Verbindung, dann sieht der Dienst selbst im Lagebericht nach, statt auf den Wächter
+         * zu warten. Ein Wechsel zwischen WLAN und Mobilfunk ist in dieser Zeit längst vorbei. Mit den
+         * Wartezeiten zwischen den Versuchen kommt der erste Blick rund eine Minute nach dem Abbruch.
+         */
+        private const val FALLBACK_AFTER_MS = 45_000L
 
         @Volatile var running = false
             private set

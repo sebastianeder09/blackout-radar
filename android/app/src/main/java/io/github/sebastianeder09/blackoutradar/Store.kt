@@ -69,6 +69,16 @@ class Store private constructor(context: Context) {
         get() = prefs.getLong("staleWarnedAt", 0L)
         set(value) = prefs.edit().putLong("staleWarnedAt", value).apply()
 
+    /** Wann die App den Lagebericht zuletzt mit den angekommenen Meldungen abgeglichen hat (Notweg). */
+    var fallbackCheckedAt: Long
+        get() = prefs.getLong("fallbackCheckedAt", 0L)
+        set(value) = prefs.edit().putLong("fallbackCheckedAt", value).apply()
+
+    /** Ob der Lagebericht die Meldungen des Radars führt. Ohne sie gibt es nichts abzugleichen. */
+    var fallbackReady: Boolean
+        get() = prefs.getBoolean("fallbackReady", false)
+        set(value) = prefs.edit().putBoolean("fallbackReady", value).apply()
+
     var updateCheckedAt: Long
         get() = prefs.getLong("updateCheckedAt", 0L)
         set(value) = prefs.edit().putLong("updateCheckedAt", value).apply()

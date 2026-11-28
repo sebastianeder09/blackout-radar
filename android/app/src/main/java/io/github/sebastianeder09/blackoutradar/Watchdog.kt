@@ -30,6 +30,7 @@ object Starter {
  * des Geräts auslöst, und eine wiederkehrende Aufgabe, die Android nach einem Neustart
  * von selbst wieder einplant. Der Wächter startet den Dienst neu, falls Android ihn
  * beendet hat, erneuert eine tote Verbindung und fragt notfalls selbst beim Server nach.
+ * Danach lädt er den Lagebericht und gleicht ihn mit den angekommenen Meldungen ab (Notweg).
  */
 object Watchdog {
     private const val JOB_ID = 4711
@@ -93,24 +94,72 @@ object Watchdog {
         }
         // Fehlt noch, was vor dem Einrichten kam, und der Server antwortet gerade: jetzt nachholen.
         if (reachable && store.historyPending) Sync.backfill(app, timeoutMs)
-        if (!quick) checkMonitor(app, store)
+        checkStatus(app, timeoutMs)
     }
 
-    /** Prüft, ob der Radar selbst noch läuft, und hält dabei den Lagebericht für die Anzeige frisch. */
-    private fun checkMonitor(context: Context, store: Store) {
+    /**
+     * Lädt den Lagebericht neu, aber nur, wenn der letzte Versuch mindestens [minGapMs] her ist. Daran
+     * hängen der Notweg (siehe [Fallback]) und die Warnung, wenn der Radar selbst stillsteht. Die Anzeige
+     * bekommt dabei den frischen Stand. Liefert die Zahl der Meldungen, die über den Notweg kamen, oder
+     * null, wenn es nichts abzugleichen gab. Immer nur ein Durchgang zur selben Zeit.
+     */
+    @Synchronized
+    fun checkStatus(context: Context, timeoutMs: Int, minGapMs: Long = MonitorWatch.CHECK_EVERY_MS): Int? {
+        val app = context.applicationContext
+        val store = Store.get(app)
+        if (store.target == null) return null
         val now = System.currentTimeMillis()
-        if (now - store.statusCheckedAt < MonitorWatch.CHECK_EVERY_MS) return
+        if (now - store.statusCheckedAt < minGapMs) return null
         store.statusCheckedAt = now
-        if (!StatusRepo.refresh(context)) return
+        val shown = Fallback.sync(app, timeoutMs) ?: return null
         val generatedAt = StatusRepo.generatedAt(store)
         if (!MonitorWatch.isStale(now, generatedAt)) {
             if (store.staleWarnedAt != 0L) {
                 store.staleWarnedAt = 0L
-                Alerts.cancelStale(context)
+                Alerts.cancelStale(app)
             }
         } else if (store.watchMonitor && MonitorWatch.shouldWarn(now, generatedAt, store.staleWarnedAt)) {
             store.staleWarnedAt = now
-            Alerts.showStale(context, generatedAt, now)
+            Alerts.showStale(app, generatedAt, now)
+        }
+        return shown
+    }
+
+    /**
+     * Derselbe Abgleich auf einem eigenen Faden. Der Dienst ruft das nach jedem vergeblichen Versuch, solange
+     * die Verbindung zu ntfy ausbleibt: Gerade dann soll der Notweg nicht auf den nächsten Wecker warten.
+     */
+    fun checkStatusAside(context: Context) {
+        val app = context.applicationContext
+        if (System.currentTimeMillis() - Store.get(app).statusCheckedAt < MonitorWatch.CHECK_EVERY_MS) return
+        val wakeLock = Awake.hold(app, "BlackoutRadar:Abgleich", 30_000L)
+        Thread({
+            try {
+                checkStatus(app, 8_000)
+            } catch (e: RuntimeException) {
+                // Der Wächter kommt ohnehin wieder.
+            } finally {
+                Awake.release(wakeLock)
+            }
+        }, "abgleich").start()
+    }
+}
+
+/** Hält das Handy für eine kurze Arbeit im Hintergrund wach. */
+object Awake {
+    fun hold(context: Context, tag: String, maxMs: Long): PowerManager.WakeLock? = try {
+        context.getSystemService(PowerManager::class.java)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, tag)
+            ?.apply { acquire(maxMs) }
+    } catch (e: RuntimeException) {
+        null
+    }
+
+    fun release(wakeLock: PowerManager.WakeLock?) {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock.release()
+        } catch (e: RuntimeException) {
+            // war schon abgelaufen
         }
     }
 }
@@ -120,24 +169,16 @@ class WatchdogReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext
         val pending = goAsync()
-        val wakeLock = try {
-            app.getSystemService(PowerManager::class.java)
-                ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BlackoutRadar:Waechter")
-                ?.apply { acquire(20_000L) }
-        } catch (e: RuntimeException) {
-            null
-        }
+        // Nachfrage bei ntfy, Lagebericht und Abgleich brauchen auch mit den kurzen Wartezeiten des Weckers
+        // im ungünstigen Fall gut 20 Sekunden.
+        val wakeLock = Awake.hold(app, "BlackoutRadar:Waechter", 30_000L)
         Thread({
             try {
                 Watchdog.run(app, quick = true)
             } catch (e: RuntimeException) {
                 // Ein Fehler hier darf den nächsten Durchgang nicht verhindern.
             } finally {
-                try {
-                    if (wakeLock?.isHeld == true) wakeLock.release()
-                } catch (e: RuntimeException) {
-                    // war schon abgelaufen
-                }
+                Awake.release(wakeLock)
                 pending.finish()
             }
         }, "waechter").start()

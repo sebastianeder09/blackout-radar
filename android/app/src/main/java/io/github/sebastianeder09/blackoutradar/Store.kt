@@ -24,6 +24,14 @@ class Store private constructor(context: Context) {
             editor.apply()
         }
 
+    /**
+     * Das Thema aus der Installationsdatei, mit dem die App schon etwas angefangen hat (siehe [AppFile]).
+     * Solange hier etwas anderes steht als in der Datei, bietet die App das Thema aus der Datei an.
+     */
+    var builtInSeen: String?
+        get() = prefs.getString("builtInSeen", null)
+        set(value) = prefs.edit().putString("builtInSeen", value).apply()
+
     /** Die letzte verarbeitete Meldung. Ab ihr fragt die App beim Server nach. */
     var lastId: String?
         get() = prefs.getString("lastId", null)

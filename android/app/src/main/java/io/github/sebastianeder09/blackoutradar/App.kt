@@ -34,6 +34,8 @@ object StateJson {
             .put("hasTopic", target != null)
             .put("topic", target?.let { Ntfy.mask(it.topic) } ?: "")
             .put("server", target?.server ?: "")
+            .put("appFile", AppFile.ENABLED)
+            .put("builtIn", AppFile.builtIn(context) != null)
             .put("conn", JSONObject()
                 .put("state", AppState.conn.name.lowercase())
                 .put("since", AppState.connSince)

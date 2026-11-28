@@ -721,15 +721,26 @@
           el('li', { text: 'Der Probealarm prüft nur Ton und Anzeige auf dem Handy. Für den ganzen Weg vom Radar über ntfy bis hierher: bei GitHub unter Actions → Blackout-Radar → Run workflow die Aktion „test-push“ starten.' }),
           el('li', null, el('a', { href: '#', onclick: e => { e.preventDefault(); N.openUrl(actionsUrl()); } }, 'Actions bei GitHub öffnen'))))));
 
-    // Weitere Handys
+    // Weitere Handys. Zwei Wege: die App als Datei, die das Thema schon enthält, oder eine Nachricht mit Download und Thema.
+    const byMessage = 'Am anderen Handy die App installieren, die ganze Nachricht kopieren und die App öffnen: ' +
+      'Sie trägt das Thema selbst ein, dort nur noch auf „Verbinden“ tippen.';
     v.append(el('div', { class: 'card' },
       el('h3', { text: 'Weitere Handys' }),
-      el('p', { class: 'small muted', text: 'Die App läuft auf beliebig vielen Handys. Die Nachricht enthält den Download und das Thema. ' +
-        'Am anderen Handy die App installieren, die ganze Nachricht kopieren und die App öffnen: ' +
-        'Sie trägt das Thema selbst ein, dort nur noch auf „Verbinden“ tippen.' }),
+      el('p', { class: 'small muted', text: 'Die App läuft auf beliebig vielen Handys. ' + (st.appFile
+        ? 'Am einfachsten gibst du sie als Datei weiter, die dein Thema schon enthält. Am anderen Handy die Datei antippen, ' +
+          'installieren und die App einmal öffnen: Sie richtet sich selbst ein, eingeben muss dort niemand etwas.'
+        : 'Die Nachricht enthält den Download und das Thema. ' + byMessage) }),
       el('div', { class: 'stack' },
-        el('button', { class: 'btn', onclick: () => N.share() }, icon('share'), 'App und Thema weitergeben')),
-      el('p', { class: 'small muted', text: 'Nur an Leute, denen du vertraust: Wer das Thema kennt, kann mitlesen und selbst Meldungen schicken.' })));
+        st.appFile ? el('button', { class: 'btn primary', onclick: () => N.shareApp() }, icon('share'), 'App samt Thema weitergeben') : null,
+        st.appFile ? el('button', { class: 'btn', onclick: () => N.share() }, 'Nur Nachricht mit Link weitergeben')
+          : el('button', { class: 'btn', onclick: () => N.share() }, icon('share'), 'App und Thema weitergeben')),
+      el('p', { class: 'small muted', text: 'Nur an Leute, denen du vertraust' + (st.appFile ? ', und nirgends öffentlich hochladen: Die Datei enthält das Thema. ' : ': ') +
+        'Wer das Thema kennt, kann mitlesen und selbst Meldungen schicken.' }),
+      st.appFile ? more('nachricht', 'Wann die Nachricht mit Link?',
+        el('ul', null,
+          el('li', { text: 'Manche Dienste nehmen keine App-Dateien an, zum Beispiel Gmail. Dann hilft die Nachricht: Sie enthält den Download und das Thema.' }),
+          el('li', { text: byMessage }),
+          el('li', { text: 'Die Datei enthält die Fassung der App, die auf diesem Handy läuft. Gibt es eine neuere, bietet die App am anderen Handy das Update von selbst an.' }))) : null));
 
     // Version
     const u = st.update;
@@ -800,7 +811,7 @@
         id: 'topic', class: 'topic', type: 'text', autocomplete: 'off', autocapitalize: 'none',
         autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'go', placeholder: 'z. B. blackout-radar-…',
         'aria-label': 'Thema', onkeydown: e => { if (e.key === 'Enter') connect(); },
-        oninput: () => { S.setup.error = ''; S.setup.fromCopy = false; S.setup.value = input.value; updateSetup(); },
+        oninput: () => { S.setup.error = ''; S.setup.fromCopy = false; S.setup.fromFile = false; S.setup.value = input.value; updateSetup(); },
       });
       input.value = S.setup.value;
       root.append(
@@ -813,6 +824,8 @@
         el('div', { class: 'row' },
           el('button', { id: 'paste', class: 'btn', onclick: () => N.paste() }, icon('paste'), 'Einfügen'),
           el('button', { id: 'connect', class: 'btn primary', onclick: connect }, 'Verbinden')),
+        // Die App kam als Datei samt Thema von einem anderen Handy: Nach "Thema ändern" führt hier ein Tipp zurück.
+        S.st.builtIn ? el('button', { id: 'builtin', class: 'btn block', onclick: () => N.useBuiltIn() }, 'Thema aus der Installationsdatei verwenden') : null,
         el('div', { id: 'setup-msg', class: 'msg-line' }),
         note('info', 'shield', 'Das Thema wirkt wie ein Passwort: Wer es kennt, kann mitlesen. ' +
           'Die App speichert es nur auf diesem Handy und schickt es nur an ntfy.sh.'),
@@ -839,6 +852,8 @@
     btn.disabled = busy || !input.value.trim();
     btn.textContent = busy ? 'Verbinde …' : 'Verbinden';
     document.getElementById('paste').disabled = busy;
+    const builtIn = document.getElementById('builtin');
+    if (builtIn) builtIn.disabled = busy;
     msg.className = 'msg-line ' + (S.setup.error ? 'error' : 'info');
     msg.textContent = S.setup.error ||
       (busy ? 'Frage bei ntfy.sh nach, was auf diesem Thema zuletzt kam …' :
@@ -874,6 +889,12 @@
       text = plural(r.count, 'Meldung', 'Meldungen') + ' der letzten 12 Stunden gefunden' +
         (newest ? ', die neueste: „' + newest.title + '“ (' + when(newest.time * 1000, now) + ').' : '.') +
         ' Ab jetzt kommt jede neue Meldung sofort.';
+    } else if (S.setup.fromFile) {
+      // Das Thema hat niemand getippt, es stammt von einem Handy, auf dem es läuft. Ein Tippfehler scheidet aus.
+      kind = 'ok';
+      title = 'Verbunden';
+      text = 'In den letzten 12 Stunden kam auf diesem Thema nichts an. Das ist normal, solange der Radar nichts zu melden hat. ' +
+        'Ab jetzt kommt jede neue Meldung sofort.';
     } else {
       kind = 'warn';
       title = 'Verbunden, aber noch keine Meldung';
@@ -885,6 +906,7 @@
       el('span', { class: 'big-icon' }, icon(kind === 'warn' ? 'alert' : kind === 'ok' ? 'check' : 'wifi')),
       el('h2', { text: title }),
       el('p', { class: 'lead', text: text }),
+      S.setup.fromFile ? el('p', { class: 'small muted', text: 'Das Thema stand schon in der Installationsdatei. Eingeben musstest du nichts.' }) : null,
       S.st.perms.notifications && S.st.perms.battery ? null :
         el('p', { class: 'small muted', text: 'Gleich fragt Android nach zwei Erlaubnissen: Benachrichtigungen zeigen und im Hintergrund laufen. ' +
           'Bitte beide erlauben, sonst kommen Alarme nicht oder zu spät.' }),
@@ -956,6 +978,7 @@
       S.setup.error = '';
       S.setup.fromLink = false;
       S.setup.fromCopy = false;
+      S.setup.fromFile = false;
       updateSetup();
     },
     /**
@@ -969,6 +992,7 @@
       S.setup.value = topic;
       S.setup.error = '';
       S.setup.fromLink = false;
+      S.setup.fromFile = false;
       S.setup.fromCopy = true;
       updateSetup();
     },
@@ -983,12 +1007,17 @@
       if (!ok) toast('GitHub ist gerade nicht erreichbar.');
       else toast(S.st.update.available ? 'Eine neue Version ist da.' : 'Die App ist auf dem neuesten Stand.');
     },
-    /** Ein Link der Form blackoutradar://abo/<thema> wurde geöffnet. */
-    offerTopic(topic, masked, same, fresh) {
+    /**
+     * Ein Thema kommt von außen: aus einem geöffneten Link der Form blackoutradar://abo/<thema>, oder (fromFile)
+     * aus der Installationsdatei, mit der ein anderes Handy die App samt Thema weitergegeben hat.
+     */
+    offerTopic(topic, masked, same, fresh, fromFile) {
       if (same) { toast('Dieses Thema ist schon eingerichtet.'); return; }
       if (fresh) {
+        // Die Datei meldet sich von selbst. Läuft schon ein Einrichten, hat das den Vorrang.
+        if (fromFile && (S.setup.busy || S.setup.result)) return;
         // Noch nichts eingerichtet: gleich verbinden, so wie nach einem Tipp auf "Verbinden".
-        S.setup = { busy: false, error: '', result: null, value: topic, fromLink: true };
+        S.setup = { busy: false, error: '', result: null, value: topic, fromLink: !fromFile, fromFile: !!fromFile };
         const input = document.getElementById('topic');
         if (input) input.value = topic;
         render();
@@ -997,16 +1026,20 @@
       }
       S.modal = {
         title: 'Neues Thema übernehmen?',
-        text: 'Der Link enthält ein anderes Thema (' + masked + '). Bisher: ' + S.st.topic + '. ' +
-          'Die App vergisst dann das bisherige Thema und die gespeicherten Meldungen.',
+        text: (fromFile ? 'Die Installationsdatei bringt ein anderes Thema mit (' : 'Der Link enthält ein anderes Thema (') + masked + '). ' +
+          'Bisher: ' + S.st.topic + '. Die App vergisst dann das bisherige Thema und die gespeicherten Meldungen.',
         ok: 'Übernehmen',
         onOk: () => {
-          S.setup = { busy: true, error: '', result: null, value: topic, fromLink: true };
+          S.setup = { busy: true, error: '', result: null, value: topic, fromLink: !fromFile, fromFile: !!fromFile };
           render();
           N.setTopic(topic);
         },
       };
       renderModal();
+    },
+    /** Die Installationsdatei mit dem Thema ließ sich nicht schreiben oder keine App nimmt sie an. */
+    onShareFailed() {
+      toast('Die Datei ließ sich nicht weitergeben. Nimm die Nachricht mit Link.');
     },
   };
 

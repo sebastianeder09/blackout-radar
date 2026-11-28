@@ -814,7 +814,8 @@
         oninput: () => { S.setup.error = ''; S.setup.fromCopy = false; S.setup.fromFile = false; S.setup.value = input.value; updateSetup(); },
       });
       input.value = S.setup.value;
-      root.append(
+      // add() lässt aus, was fehlt (den Knopf zur Installationsdatei). root.append() schriebe dafür das Wort "null" in die Seite.
+      add(root, [
         el('div', { class: 'brand-big', html: LOGO_BIG }, el('b', { text: 'Blackout-Radar' })),
         el('h2', { text: 'Alarme auf dieses Handy holen' }),
         el('p', { class: 'lead', text: 'Trag das ntfy-Thema ein, an das der Radar seine Meldungen schickt. ' +
@@ -837,7 +838,7 @@
             el('li', { text: 'Am einfachsten schickst du es dir selbst per E-Mail oder Messenger, kopierst es hier am Handy und tippst auf „Einfügen“.' }),
             el('li', { text: 'Es genügt der Name. Eine ganze Adresse wie https://ntfy.sh/… geht auch.' }),
             el('li', { text: 'Solange diese Seite offen ist, sieht die App in die Zwischenablage. Sie übernimmt daraus nur ' +
-              'eine weitergegebene Nachricht des Blackout-Radars, alles andere lässt sie liegen.' }))));
+              'eine weitergegebene Nachricht des Blackout-Radars, alles andere lässt sie liegen.' })))]);
     }
     updateSetup();
   }

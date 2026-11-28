@@ -11,7 +11,8 @@
 # nach, was in der Datei stehen muss), und beide werden aus dieser Datei frisch installiert:
 # Beim ersten Öffnen müssen sie verbunden sein, ohne dass jemand etwas eingibt.
 #
-# Was die App anzeigt, liest seite.py aus der Seite selbst. Ob das Bild am Handy einer Änderung
+# Was die App anzeigt, liest seite.py aus der Seite selbst. Auf jeder Seite, die der Lauf zeigt, sucht
+# fremdtext.js nach Text, der dort nie stehen soll (ein nacktes "null"). Ob das Bild am Handy einer Änderung
 # auch folgt, zeigt der Vergleich zweier Bildschirmfotos (Vorschau.java). Am Ende steht die Frage,
 # ob die App im Lauf abgestürzt ist, mit einem absichtlichen Absturz des Testbaus als Gegenprobe.
 # Ergebnisse (Bilder, Ablauf, Protokolle) landen in $OUT.
@@ -139,6 +140,20 @@ layout() {  # Paket Name: Kopfzeile oben, Leiste unten, nichts ragt seitlich hin
   [[ "$verdict" == ok* ]]
 }
 
+# Steht irgendwo in der Seite ein nacktes "null" oder "undefined" (fremdtext.js)? So etwas bleibt, wenn der Aufbau der
+# Seite einen fehlenden Wert als Text einfügt. Geprüft wird jede Seite, die der Lauf ohnehin zeigt, das Ergebnis
+# steht am Schluss in einer Zeile.
+PAGES=0
+STRAY=""
+clean() {  # Paket Name der Seite
+  local verdict
+  verdict=$(page "$1" "$(cat "$HERE/fremdtext.js")")
+  PAGES=$((PAGES + 1))
+  [ "$verdict" = sauber ] && return 0
+  log "Fremdtext, $2: ${verdict:-Seite nicht lesbar}"
+  STRAY="$STRAY \"$2\""
+}
+
 changed() {  # Bild1 Bild2 Von Bis: hat sich das Bild zwischen den beiden Höhen (Prozent von oben) geändert?
   local verdict code
   verdict=$(java -Djava.awt.headless=true "$HERE/Vorschau.java" vergleichen "$OUT/$1.png" "$OUT/$2.png" "$3" "$4" 2> "$OUT/vergleich-fehler.txt")
@@ -211,6 +226,7 @@ log "Bildschirm: $(adb shell wm size | tr -d '\r' | tr '\n' ' ')$(adb shell wm d
 # ------------------------------------------------------------ Testbau: Blackout
 adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
 page_has "$DBG" "Alarme auf dieses Handy holen" && ok "Testbau: Einrichten wird angezeigt" || bad "Testbau: Einrichten fehlt"
+clean "$DBG" "Testbau: Einrichten"
 shot 00-einrichten
 # Ein weiteres Handy einrichten: Die weitergegebene Nachricht liegt in der Zwischenablage, so als hätte sie jemand
 # im Messenger kopiert. Wechselt der Mensch danach in die App, steht das Thema schon im Feld. Verbinden tippt er
@@ -247,10 +263,12 @@ done
 sleep 4
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab lage > /dev/null
 page_has "$DBG" "Laufender Stromausfall" && ok "Testbau: Lagebericht mit laufendem Blackout angezeigt" || bad "Testbau: Lagebericht fehlt"
+clean "$DBG" "Testbau: Lage"
 shot 10-blackout-lage
 layout "$DBG" "Testbau" && ok "Testbau: Kopfzeile und Leiste sitzen richtig" || bad "Testbau: Aufbau der Seite stimmt nicht"
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab meldungen > /dev/null
 page_has "$DBG" "Die App behält die letzten 300 Meldungen" && ok "Testbau: Liste der Meldungen angezeigt" || bad "Testbau: Liste der Meldungen fehlt"
+clean "$DBG" "Testbau: Meldungen"
 shot 11-blackout-meldungen
 # Eine Meldung kommt, während die Liste offen ist und niemand das Handy berührt. Bis zum Bild fragt
 # auch der Test die Seite nicht, damit die Anzeige wirklich von selbst nachziehen muss.
@@ -334,6 +352,7 @@ done
   || bad "Notweg: nach der Rückkehr von ntfy $(cards "Notweg von selbst") Karten und $(notifications "Notweg von selbst") Benachrichtigungen statt je 1"
 adb shell am start -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
 page_has "$DBG" "Meldungen kommen sofort an" && ok "Testbau: Verbindung wird als bestehend angezeigt" || bad "Testbau: Anzeige der Verbindung stimmt nicht"
+clean "$DBG" "Testbau: App"
 page_has "$DBG" "bereit · Abgleich" && ok "Testbau: Notweg wird als bereit angezeigt" || bad "Testbau: Anzeige des Notwegs stimmt nicht"
 shot 12-blackout-app
 adb shell cmd uimode night yes > /dev/null
@@ -351,12 +370,14 @@ sleep 3
 adb shell am start -W -a android.intent.action.VIEW -d "blackoutradar://abo/$TOPIC" -p "$PKG" > /dev/null
 page_has "$PKG" "Meldung der letzten 12 Stunden" && ok "Einrichten per Link: Thema übernommen, vorhandene Meldung gefunden" \
   || bad "Einrichten per Link: Ergebnis nicht wie erwartet"
+clean "$PKG" "fertige App: Ergebnis des Einrichtens"
 shot 01-eingerichtet
 page "$PKG" "document.querySelector('.result .btn.primary').click()" > /dev/null  # Knopf "Weiter"
 shot 02-lage 4  # bis zum Bild fragt der Test die Seite nicht weiter
 changed 01-eingerichtet 02-lage 15 90 && ok "Bild folgt dem Wechsel zur Lage von selbst" || bad "Bild bleibt nach dem Wechsel zur Lage stehen"
 page_has "$PKG" "Lagebericht des Blackout-Radars" && ok "Lagebericht des echten Radars geladen und angezeigt" \
   || bad "Lagebericht des echten Radars fehlt"
+clean "$PKG" "fertige App: Lage"
 layout "$PKG" "fertige App" && ok "Kopfzeile und Leiste sitzen richtig" || bad "Aufbau der Seite stimmt nicht"
 
 for _ in $(seq 1 30); do service_running "$PKG" && break; sleep 1; done
@@ -438,9 +459,11 @@ for title in "CI Vorab" "CI Alarm live" "CI Funkloch" "CI Ruhezustand" "CI Nach 
   page_has "$PKG" "$title" || missing="$missing \"$title\""
 done
 [ -z "$missing" ] && ok "Liste der Meldungen vollständig, auch nach dem Neustart" || bad "In der Liste der Meldungen fehlt:$missing"
+clean "$PKG" "fertige App: Meldungen"
 shot 04-meldungen
 adb shell am start -n "$PKG/.MainActivity" --es tab app > /dev/null
 page_has "$PKG" "Meldungen kommen sofort an" && ok "Verbindung wird als bestehend angezeigt" || bad "Anzeige der Verbindung stimmt nicht"
+clean "$PKG" "fertige App: App"
 shot 05-app
 # Weitergeben an ein weiteres Handy: Karte mit den beiden Knöpfen. Android zeigt seine Auswahl, erst mit der fertigen
 # Nachricht, dann mit der App als Datei samt Thema. Was in dieser Datei steht, prüft der Schluss des Tests.
@@ -555,6 +578,7 @@ answer=$(adb install -r "$WORK/testbau-anderes.apk" 2>&1) && ok "Datei mit Thema
 adb shell am start -W -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
 page_has "$DBG" "Die Installationsdatei bringt ein anderes Thema mit" && ok "Datei mit anderem Thema: App fragt nach, statt das Thema zu ersetzen" \
   || bad "Datei mit anderem Thema: Rückfrage fehlt"
+clean "$DBG" "Testbau: Rückfrage zum Thema aus der Datei"
 shot 18-datei-anderes-thema
 page "$DBG" "document.querySelector('#modal .btn').click()" > /dev/null  # "Abbrechen"
 adb shell am force-stop "$DBG"
@@ -582,6 +606,7 @@ if t=$(wait_page "$DBG" "Das Thema stand schon in der Installationsdatei" 40); t
 else
   bad "Testbau aus der Datei: hat sich nicht von selbst eingerichtet"
 fi
+clean "$DBG" "Testbau aus der Datei: Ergebnis des Einrichtens"
 shot 19-datei-testbau-eingerichtet
 log "Testbau aus der Datei: $(debug_app --es status http://10.0.2.2:8765)"  # Lagebericht wieder vom nachgestellten Server
 curl -sS -H "Title: Aus der Datei" -H "Priority: 4" -H "Tags: warning" -d "Zustellung an das Handy, das die App als Datei bekam" http://127.0.0.1:8765/testthema > /dev/null
@@ -595,6 +620,7 @@ else
 fi
 page_has "$PKG" "der letzten 12 Stunden gefunden" && ok "Fertige App aus der Datei: Meldungen dieses Laufs bei ntfy.sh gefunden" \
   || bad "Fertige App aus der Datei: Meldungen dieses Laufs nicht gefunden"
+clean "$PKG" "fertige App aus der Datei: Ergebnis des Einrichtens"
 shot 20-datei-fertige-app-eingerichtet
 page "$PKG" "document.querySelector('.result .btn.primary').click()" > /dev/null  # Knopf "Weiter"
 for _ in $(seq 1 30); do service_running "$PKG" && break; sleep 1; done
@@ -602,6 +628,8 @@ sleep 5
 publish "CI Aus der Datei" 4 warning "Diese Meldung kam an dem Handy an, das die App als Datei samt Thema bekam."
 if t=$(wait_notification "CI Aus der Datei" 60); then ok "Fertige App aus der Datei: Meldung über ntfy.sh nach $t s angekommen"; else bad "Fertige App aus der Datei: Meldung über ntfy.sh nicht angekommen"; fi
 rm -rf "$WORK"
+
+[ -z "$STRAY" ] && ok "Keine der $PAGES geprüften Seiten zeigt Fremdtext wie „null“" || bad "Fremdtext wie „null“ in der Seite:$STRAY"
 
 adb logcat -d > "$OUT/logcat.txt" 2>&1
 adb shell dumpsys notification --noredact > "$OUT/benachrichtigungen.txt" 2>&1

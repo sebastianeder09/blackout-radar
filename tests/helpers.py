@@ -70,3 +70,10 @@ def play(engine, script, until: int, step: int = 5) -> list[tuple]:
         for message in engine.tick(script(minute, now), now):
             sent.append((minute, message))
     return sent
+
+
+# Schlüssel für die Tests des öffentlichen Alarms. Es ist der Beispielschlüssel aus RFC 6979 (A.2.5): Sein
+# geheimer Teil ist allgemein bekannt. Nur Testfassungen der App nehmen ihn an, die echte App nie.
+TEST_KEY = "BRKEY1:test:c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721"
+TEST_KEY_PUBLIC = ("0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6"
+                   "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299")

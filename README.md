@@ -65,6 +65,7 @@ Im Repository unter *Settings → Secrets and variables → Actions → New repo
 | `SMTP_USER`, `SMTP_PASSWORD` | Anmeldung am Postausgangsserver | E-Mail |
 | `MAIL_TO` | Empfänger, mehrere mit Komma getrennt | E-Mail |
 | `MAIL_FROM` | Absender, falls er vom Benutzernamen abweicht | E-Mail, optional |
+| `ALARM_KEY` | Schlüssel, mit dem der Radar die Meldungen für alle unterschreibt | öffentlicher Alarm (Schritt 5) |
 
 Zugangsdaten gehören nie in `config.toml`, weil das Repository öffentlich ist.
 
@@ -88,21 +89,37 @@ Der nächste Lauf des Radars startet die Kette von selbst. Sofort geht es von Ha
 - **Abschalten:** die Wartezeit entfernen oder die Umgebung `takt` löschen. Die Kette endet dann mit dem nächsten Glied.
 - Wartezeiten bietet GitHub in öffentlichen Repositories kostenlos an, in privaten nur mit bezahltem Plan.
 
+**5. Öffentlicher Alarm für alle (freiwillig)**
+
+Das Thema aus Schritt 1 ist privat und wirkt wie ein Passwort. Daneben gibt es einen zweiten Weg für alle, die nur die App installieren: ein festes, öffentliches Thema (`blackout-radar-alarm` bei ntfy.sh), das in der App schon eingebaut ist. Installieren, öffnen, fertig.
+
+Ein öffentliches Thema kann jeder lesen und jeder beschreiben. Deshalb unterschreibt der Radar dort jede Meldung, und die App prüft die Unterschrift:
+
+- Der Radar unterschreibt mit einem geheimen Schlüssel (ECDSA, Kurve P-256, SHA-256). Er liegt nur als Secret `ALARM_KEY` bei GitHub.
+- Die App kennt nur den öffentlichen Teil. Was keine gültige Unterschrift trägt, verwirft sie stillschweigend, ohne Ton und ohne Eintrag.
+- Unterschrieben sind Thema, Titel, Text, Link, Dringlichkeit, Zeit und Schlüssel der Meldung. Aus einer harmlosen Meldung lässt sich also kein Alarm machen, und eine alte echte Meldung lässt sich nicht als neue ausgeben.
+- An alle gehen Ausfälle, Warnungen, Entwarnungen und die tägliche Übersicht. Meldungen über den Betrieb (gestörte Datenquelle, Lücke, Programmfehler), Testmeldungen und das Planspiel bleiben beim Betreiber.
+
+Einschalten: das Secret `ALARM_KEY` eintragen. Der Radar prüft bei jedem Lauf, ob der Schlüssel zu dem in der App passt. Passt er nicht, sendet er nichts an das öffentliche Thema und sagt das im Lagebericht. Ob alles stimmt, zeigt die Aktion `diagnose` unter "Öffentlicher Alarm": Sie nennt den Stand, zählt die Meldungen im Thema mit gültiger Unterschrift und schickt zur Gegenprobe fünf unterschriebene Probemeldungen an ein zufälliges Wegwerf-Thema.
+
+Ein neues Schlüsselpaar erzeugt `python3 -m blackout_radar key --name k2`. Der öffentliche Teil gehört dann in `blackout_radar/sign.py` (`PUBLIC_KEYS`) und in die App. Die App kann mehrere Schlüssel kennen, so lässt sich ein Schlüssel ablösen, ohne dass ein Handy eine Meldung verpasst.
+
 ## Bedienen
 
-Unter *Actions → Blackout-Radar → Run workflow* gibt es fünf Aktionen:
+Unter *Actions → Blackout-Radar → Run workflow* gibt es sechs Aktionen:
 
 | Aktion | Wirkung |
 |---|---|
 | `lauf` | ein normaler Lauf außer der Reihe |
-| `test-push` | schickt eine Testmeldung an alle eingerichteten Kanäle |
+| `test-push` | schickt eine Testmeldung an die eigenen Kanäle (ntfy, E-Mail), nicht an den öffentlichen Alarm |
 | `planspiel` | spielt einen Blackout in Österreich im Zeitraffer durch und schickt 16 Meldungen mit dem Vermerk [TEST] |
 | `diagnose` | fragt jede Datenquelle einmal ab und zeigt die Antworten im Protokoll |
 | `takt` | startet den Taktgeber (Einrichten, Schritt 4). Selten nötig, weil jeder Lauf ihn von selbst startet |
+| `test-oeffentlich` | schickt eine unterschriebene Testmeldung an den öffentlichen Alarm. Sie erreicht **alle**, die die App nutzen, als gewöhnliche Meldung ohne Alarmton |
 
 **Lagebericht:** <https://github.com/sebastianeder09/blackout-radar/blob/state/status.md>
 
-Jede Meldung führt per Antippen dorthin. Der Bericht zeigt laufende und beendete Ereignisse mit Zeitleiste, Störungen unter Beobachtung, Kennzahlen (Netzfrequenz, Stromlast), Statistik über 24 Stunden bis 90 Tage und den Zustand der Datenquellen. Dieselben Daten liegen maschinenlesbar in `status.json` daneben. Dort stehen auch die letzten 20 Meldungen mit Text und Dringlichkeit (`notices`, neueste zuerst), damit eine App nachholen kann, was als Push nicht ankam, und die Erreichbarkeit der Messquellen in Europa (`europe`).
+Jede Meldung führt per Antippen dorthin. Der Bericht zeigt laufende und beendete Ereignisse mit Zeitleiste, Störungen unter Beobachtung, Kennzahlen (Netzfrequenz, Stromlast), Statistik über 24 Stunden bis 90 Tage und den Zustand der Datenquellen. Dieselben Daten liegen maschinenlesbar in `status.json` daneben. Dort stehen auch die letzten 20 Meldungen mit Text und Dringlichkeit (`notices`, neueste zuerst), damit eine App nachholen kann, was als Push nicht ankam, die Erreichbarkeit der Messquellen in Europa (`europe`) und der Stand des öffentlichen Alarms (`public`). Bei jeder Meldung steht, für wen sie gedacht ist (`scope`: `all` für alle, `operator` nur für den Betreiber) und über welche Kanäle sie zugestellt wurde.
 
 Täglich um 07:00 Uhr kommt eine leise Übersicht. Sie ist zugleich das Lebenszeichen: Bleibt sie aus, läuft die Überwachung nicht mehr.
 
@@ -201,6 +218,7 @@ Italien und Slowenien werden nicht überwacht: Ihre Lastwerte waren bei der Prü
 - **Google News** bietet die Suche als RSS für Feed-Leser an, ohne Zusage. Fällt eine Quelle 3 Stunden aus, kommt eine Meldung. Fällt nur Google News oder nur der Weg über die Feeds aus, läuft der andere weiter, und die Quelle gilt als "eingeschränkt". Die gezielten Suchen für Oberösterreich und Österreich gibt es nur bei Google News. Jede abgewiesene Abfrage steht im Protokoll des Laufs.
 - **Stromausfall in ganz Europa:** Radar, Push-Dienst und Nachrichtenquellen stehen in den USA, zugesagt ist das von keinem der Anbieter. Die Messquellen in Europa fallen dann voraussichtlich aus, und ob Starlink weiterläuft, ist offen. Siehe [Stromausfall in ganz Europa](#stromausfall-in-ganz-europa).
 - **Öffentlich:** Repository, Lagebericht und Protokolle sind für jeden lesbar. Zugangsdaten stehen nur in den GitHub-Secrets und werden aus Fehlertexten entfernt.
+- **Öffentlicher Alarm:** Die Unterschrift schützt vor gefälschten Meldungen, nicht vor Störern. Jeder kann das öffentliche Thema mit Unsinn füllen (die App verwirft ihn, verbraucht dabei aber Strom und Daten), und wer bei ntfy.sh zahlt, kann einen freien Themennamen für sich reservieren und damit sperren. In beiden Fällen holt die App die Meldungen über den Lagebericht bei GitHub nach, mit einigen Minuten Verzug. Wer das ausschließen will, reserviert das Thema selbst (kostenpflichtig bei ntfy.sh, Zugriffstoken dann als Secret `ALARM_TOKEN`) oder betreibt einen eigenen ntfy-Server. Die Unterschrift wird in reinem Python gerechnet und läuft nicht in gleichbleibender Zeit. Das ist vertretbar, weil sich die Rechenzeit eines Laufs bei GitHub von außen nicht ausmessen lässt.
 
 ## Eigener Rechner statt GitHub
 
@@ -214,7 +232,7 @@ set -a; . ./.env; set +a
 python3 -m blackout_radar daemon
 ```
 
-Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anzeigen), `status`, `test-push`, `simulate`, `probe` (Diagnose der Datenquellen, mit `--only feeds` nur die Feeds aus Übersee), `probe --only replay` (lädt die Lastwerte der echten Ausfälle neu und spielt sie durch). Der Zustand liegt dann unter `data/`. Ein Rechner im eigenen Haus fällt bei einem Stromausfall allerdings mit aus.
+Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anzeigen), `status`, `test-push` (mit `--public` an den öffentlichen Alarm), `key` (neues Schlüsselpaar für den öffentlichen Alarm), `simulate`, `probe` (Diagnose der Datenquellen, mit `--only feeds` nur die Feeds aus Übersee), `probe --only replay` (lädt die Lastwerte der echten Ausfälle neu und spielt sie durch). Der Zustand liegt dann unter `data/`. Ein Rechner im eigenen Haus fällt bei einem Stromausfall allerdings mit aus.
 
 ## Aufbau
 
@@ -224,7 +242,8 @@ Weitere Befehle: `run` (ein Lauf), `run --dry-run` (nichts verschicken, nur anze
 | `blackout_radar/engine.py` | fasst Signale zu Ereignissen zusammen und entscheidet, was gemeldet wird |
 | `blackout_radar/gazetteer.py`, `gemeindeliste.py` | Ortsnamen in Schlagzeilen: Staaten, große Städte, "Europa", Gemeinden in Österreich |
 | `blackout_radar/reach.py` | Erreichbarkeit der Messquellen in Europa |
-| `blackout_radar/notify.py` | Versand über ntfy und E-Mail mit Wiederholung |
+| `blackout_radar/notify.py` | Versand über ntfy, E-Mail und den öffentlichen Alarm, mit Wiederholung |
+| `blackout_radar/sign.py` | Unterschrift für den öffentlichen Alarm (ECDSA P-256 in reinem Python) und ihre Prüfung |
 | `blackout_radar/report.py` | Lagebericht, Statistik, tägliche Übersicht |
 | `blackout_radar/simulate.py` | Planspiel |
 | `blackout_radar/takt.py` | Taktgeber: die Kette von Läufen bei GitHub und ihre Sicherungen |

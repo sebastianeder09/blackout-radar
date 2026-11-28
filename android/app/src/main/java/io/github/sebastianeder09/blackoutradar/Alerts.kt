@@ -154,9 +154,7 @@ object Alerts {
 
     /** Hinweis, dass der Radar selbst stillsteht. Wer den öffentlichen Alarm nutzt, betreibt den Radar nicht selbst. */
     fun showStale(context: Context, generatedAtMs: Long, nowMs: Long) {
-        val text = "Der letzte Lagebericht ist ${MonitorWatch.age(nowMs - generatedAtMs)} alt. " +
-            if (PublicAlarm.active(Store.get(context))) "Der Radar läuft vermutlich gerade nicht. Solange kommen auch keine Alarme."
-            else "Die Überwachung bei GitHub läuft vermutlich nicht, es kämen also auch keine Alarme."
+        val text = MonitorWatch.staleText(nowMs - generatedAtMs, PublicAlarm.active(Store.get(context)))
         val notification = Notification.Builder(context, CH_APP)
             .setSmallIcon(R.drawable.ic_stat_bolt)
             .setContentTitle("Der Blackout-Radar steht still")

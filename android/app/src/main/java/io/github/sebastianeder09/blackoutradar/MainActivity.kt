@@ -138,8 +138,13 @@ class MainActivity : Activity() {
         if (pageReady) showTab(tab) else pendingTab = tab
     }
 
-    /** Liest das Thema aus einem Link wie blackoutradar://abo/thema oder blackoutradar://abo?thema=thema. */
+    /**
+     * Liest das Thema aus einem Link wie blackoutradar://abo/thema oder blackoutradar://abo?thema=thema.
+     * Die Fassung aus dem Play Store meldet sich für solche Links gar nicht an (das tut nur das Manifest der
+     * Fassung von GitHub). Kommt trotzdem einer an, gilt er nicht: Diese Fassung kennt nur den öffentlichen Alarm.
+     */
     private fun linkTarget(intent: Intent?): Target? {
+        if (PublicAlarm.ONLY) return null
         val data = intent?.data ?: return null
         if (intent.action != Intent.ACTION_VIEW) return null
         return Ntfy.parseLink(data.toString())

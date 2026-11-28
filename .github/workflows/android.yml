@@ -91,6 +91,17 @@ jobs:
           "$tools/aapt2" dump badging apk/blackout-radar-play-test.apk > angaben-play.txt
           head -1 angaben-play.txt
           grep -q "^package: name='at.ase_it.blackoutradar.debug' " angaben-play.txt
+          # Links zu einem eigenen Radar (blackoutradar://abo/<thema>) nimmt nur die Fassung von GitHub an. Die Fassung
+          # für Google Play kennt nur den öffentlichen Alarm und meldet sich bei Android für solche Links nicht an.
+          for name in blackout-radar blackout-radar-test blackout-radar-play-test; do
+            "$tools/aapt2" dump xmltree --file AndroidManifest.xml "apk/$name.apk" > "manifest-$name.txt"
+            grep -q "android.intent.action.MAIN" "manifest-$name.txt"
+          done
+          grep -q "android:scheme.*blackoutradar" manifest-blackout-radar.txt
+          grep -q "android:scheme.*blackoutradar" manifest-blackout-radar-test.txt
+          if grep "android:scheme" manifest-blackout-radar-play-test.txt; then
+            echo "Die Fassung für Google Play meldet sich für Links an"; exit 1
+          fi
           # Impressum und Datenschutzerklärung stecken in der App, Wort für Wort wie in docs/.
           for text in impressum datenschutz; do
             unzip -p apk/blackout-radar.apk "assets/rechtstexte/$text.md" | cmp - "docs/$text.md"
@@ -128,6 +139,12 @@ jobs:
             base/assets/rechtstexte/impressum.md base/assets/rechtstexte/datenschutz.md; do
             grep -q " $file\$" inhalt.txt || { echo "Im Paket fehlt $file"; exit 1; }
           done
+          # Auch das Paket meldet sich für keine Links an: Im Manifest steht der Start der App, aber kein "VIEW".
+          unzip -p "$bundle" base/manifest/AndroidManifest.xml > manifest-paket.bin
+          grep -a -q "android.intent.action.MAIN" manifest-paket.bin
+          if grep -a -q "android.intent.action.VIEW" manifest-paket.bin; then
+            echo "Das Paket für Google Play meldet sich für Links an"; exit 1
+          fi
           if [ -n "$PLAY_UPLOAD_PASSWORD" ]; then
             jarsigner -verify "$bundle" | tee signatur-play.txt
             grep -q "jar verified" signatur-play.txt

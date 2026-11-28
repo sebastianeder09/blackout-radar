@@ -25,6 +25,12 @@ object PublicAlarm {
      */
     const val MAX_DELAY_S = 13 * 60 * 60L
 
+    /**
+     * Die Fassung aus dem Play Store kennt nur den öffentlichen Alarm. Einen eigenen Radar bietet sie nicht an,
+     * und ein Thema aus einem Link (blackoutradar://abo/…) nimmt sie nicht an.
+     */
+    val ONLY: Boolean = BuildConfig.PLAY
+
     private val BUILT_IN = Target(Ntfy.DEFAULT_SERVER, TOPIC)
 
     /** Wohin sich die App für den öffentlichen Alarm verbindet. Nur der Testbau kennt ein anderes Ziel. */

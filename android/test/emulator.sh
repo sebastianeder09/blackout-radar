@@ -1021,6 +1021,22 @@ by_normal=$(by_width)
 shot 31-play-lage
 for _ in $(seq 1 30); do service_running "$PLAY" && break; sleep 1; done
 service_running "$PLAY" && ok "Play: Hintergrunddienst läuft" || bad "Play: Hintergrunddienst läuft nicht"
+# Diese Fassung kennt nur den öffentlichen Alarm. Für Links zu einem eigenen Radar (blackoutradar://abo/<thema>)
+# meldet sie sich bei Android nicht an. Die Fassung von GitHub tut das, sie ist hier die Gegenprobe. Schickt jemand
+# so einen Link gezielt an die App, ändert sich nichts: keine Rückfrage, keine Seite zum Einrichten. Dass der
+# öffentliche Alarm danach noch eingeschaltet ist, zeigt der unterschriebene Alarm gleich darauf.
+takers=$(adb shell cmd package query-activities --components -a android.intent.action.VIEW -d "blackoutradar://abo/fremdes-thema" 2>&1 | tr -d '\r')
+log "Play: Für Links zu einem eigenen Radar melden sich an: $(tr '\n' ' ' <<< "$takers")"
+if grep -q "^[[:space:]]*$PKG/" <<< "$takers" && ! grep -q "$PLAY/" <<< "$takers"; then
+  ok "Play: für Links zu einem eigenen Radar meldet sich die Fassung von GitHub an, diese Fassung nicht"
+else
+  bad "Play: Anmeldung für Links zu einem eigenen Radar stimmt nicht"
+fi
+log "Play: Link gezielt an die App: $(adb shell am start -W -a android.intent.action.VIEW -d "blackoutradar://abo/fremdes-thema" -n "$PLAY/$PKG.MainActivity" 2>&1 | tr -d '\r' | tr '\n' ' ')"
+sleep 3
+calm=$(page "$PLAY" "!document.querySelector('#modal.show') && !document.getElementById('topic') && document.body.innerText.includes('Laufender Stromausfall')")
+[ "$calm" = true ] && ok "Play: ein Link zu einem eigenen Radar ändert nichts, die App bleibt bei der Lage und fragt nicht nach" \
+  || bad "Play: ein Link zu einem eigenen Radar hat die Seite verändert ($(page "$PLAY" "(document.querySelector('#modal.show') || document.body).innerText.slice(0, 120)" | tr '\n' ' '))"
 log "Radar: $(radar radar/meldung '{"title": "Alarm im Play-Bau", "body": "Probe aus dem Emulator-Test: unterschriebener Alarm für die Fassung für Google Play.", "level": "alarm"}')"
 arrived=nein
 for _ in $(seq 1 20); do

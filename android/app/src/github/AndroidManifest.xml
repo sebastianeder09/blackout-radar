@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Nur die Fassung von GitHub: Einrichten des eigenen Radars per Link, blackoutradar://abo/<thema>.
+         Die Fassung aus dem Play Store kennt nur den öffentlichen Alarm und meldet sich für diese Links nicht an. -->
+    <application>
+        <activity
+            android:name="io.github.sebastianeder09.blackoutradar.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="blackoutradar" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

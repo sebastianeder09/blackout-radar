@@ -32,13 +32,8 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Einrichten per Link: blackoutradar://abo/<thema> -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="blackoutradar" />
-            </intent-filter>
+            <!-- Einrichten per Link (blackoutradar://abo/<thema>): steht im Manifest der Fassung von GitHub
+                 (src/github). Die Fassung aus dem Play Store kennt nur den öffentlichen Alarm. -->
         </activity>
 
         <!-- Hält die Verbindung zum ntfy-Server. "specialUse", weil keine der festen Arten von Android passt. -->

@@ -34,8 +34,21 @@ object StateJson {
             .put("hasTopic", target != null)
             .put("topic", target?.let { Ntfy.mask(it.topic) } ?: "")
             .put("server", target?.server ?: "")
+            // Der öffentliche Alarm: festes Thema für alle, nur unterschriebene Meldungen zählen.
+            .put("public", target != null && target == PublicAlarm.target(store))
+            // Die Fassung aus dem Play Store aktualisiert sich dort und gibt sich nicht als Datei weiter.
+            .put("play", BuildConfig.PLAY)
             .put("appFile", AppFile.ENABLED)
             .put("builtIn", AppFile.builtIn(context) != null)
+            .put("brand", JSONObject()
+                .put("name", Brand.NAME)
+                .put("web", Brand.WEB)
+                .put("contact", Brand.CONTACT)
+                .put("phone", Brand.PHONE)
+                .put("mail", Brand.MAIL))
+            .put("legal", JSONObject()
+                .put("imprint", Legal.url(Legal.IMPRINT))
+                .put("privacy", Legal.url(Legal.PRIVACY)))
             .put("conn", JSONObject()
                 .put("state", AppState.conn.name.lowercase())
                 .put("since", AppState.connSince)
@@ -61,13 +74,22 @@ object StateJson {
                 .put("checkedAt", store.fallbackCheckedAt))
             .put("update", JSONObject()
                 .put("latest", store.latestBuild)
-                .put("available", store.latestBuild > BuildConfig.VERSION_CODE))
+                .put("available", Updates.ENABLED && store.latestBuild > BuildConfig.VERSION_CODE))
     }
 }
 
-/** Neue Fassungen der App. Sie liegen als Download bei GitHub, einen Store gibt es nicht. */
+/**
+ * Neue Fassungen der App. Die Fassung von GitHub liegt dort als Download und sieht selbst nach, ob es eine
+ * neuere gibt. Die Fassung aus dem Play Store lässt das bleiben: Dort aktualisiert der Store, und eine App
+ * von dort darf sich nicht an ihm vorbei erneuern.
+ */
 object Updates {
-    val DOWNLOAD_URL: String = "https://github.com/" + BuildConfig.REPO + "/releases/latest/download/blackout-radar.apk"
+    val ENABLED: Boolean = !BuildConfig.PLAY
+
+    /** Wo es die App gibt: im Play Store oder als Datei bei GitHub. Steht in der Nachricht zum Weitergeben. */
+    val DOWNLOAD_URL: String =
+        if (BuildConfig.PLAY) "https://play.google.com/store/apps/details?id=" + BuildConfig.APPLICATION_ID.removeSuffix(".debug")
+        else "https://github.com/" + BuildConfig.REPO + "/releases/latest/download/blackout-radar.apk"
     const val CHECK_EVERY_MS = 12 * 60 * 60_000L
 
     private val TAG = Regex("app-v(\\d{1,9})")
@@ -77,6 +99,7 @@ object Updates {
 
     /** Fragt GitHub nach der neuesten Fassung. Liefert true, wenn die Abfrage gelungen ist. */
     fun check(context: Context): Boolean {
+        if (!ENABLED) return true
         val store = Store.get(context)
         store.updateCheckedAt = System.currentTimeMillis()
         return try {
@@ -89,6 +112,48 @@ object Updates {
             false
         } catch (e: JSONException) {
             false
+        }
+    }
+}
+
+/**
+ * Wer die App anbietet. Dieselben Angaben stehen im Impressum (docs/impressum.md). Die Seite zeigt sie unter
+ * "Über uns", von dort führen Knöpfe zur Homepage und zum Telefon.
+ */
+object Brand {
+    const val NAME = "ASE-IT"
+    const val WEB = "https://www.ase-it.at"
+    const val CONTACT = "https://www.ase-it.at/kontakt/"
+    const val PHONE = "07263 883 52 10"
+
+    /** Dieselbe Nummer in der Form, die das Telefon wählt. */
+    const val PHONE_DIAL = "+4372638835210"
+
+    /** E-Mail-Adresse für Anfragen. Leer hieße: Die Seite bietet stattdessen die Kontaktseite der Homepage an. */
+    const val MAIL = "office@ase-it.at"
+}
+
+/**
+ * Impressum und Datenschutzerklärung. Der Wortlaut liegt einmal im Repository (docs/) und kommt beim Bauen in
+ * die App (Ordner "rechtstexte" in den Assets, siehe app/build.gradle.kts). So zeigt die App genau den Text,
+ * der auch öffentlich im Netz steht, und sie zeigt ihn ohne Netz.
+ */
+object Legal {
+    const val IMPRINT = "impressum"
+    const val PRIVACY = "datenschutz"
+
+    private val NAMES = setOf(IMPRINT, PRIVACY)
+
+    /** Die Adresse, unter der derselbe Text öffentlich steht. Sie gehört auch in den Eintrag im Play Store. */
+    fun url(name: String): String = "https://github.com/" + BuildConfig.REPO + "/blob/main/docs/" + name + ".md"
+
+    /** Der Text aus der App selbst, oder leer, wenn es ihn nicht gibt. */
+    fun text(context: Context, name: String): String {
+        if (name !in NAMES) return ""
+        return try {
+            context.assets.open("rechtstexte/$name.md").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } catch (e: IOException) {
+            ""
         }
     }
 }

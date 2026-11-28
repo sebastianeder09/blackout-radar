@@ -2,6 +2,7 @@ package io.github.sebastianeder09.blackoutradar
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -90,6 +91,27 @@ class MessageLogTest {
         // Ein Eintrag, den es nicht gibt, stört nicht.
         assertTrue(log.replace("gibt-es-nicht", notice("ntfy2", 40)))
         assertEquals(4, log.all().size)
+    }
+
+    @Test
+    fun zustellungMitGleicherKennungTrittAnDieStelleDesNotwegs() {
+        // Beim öffentlichen Alarm trägt eine Meldung auf jedem Weg dieselbe Kennung.
+        val file = folder.newFile("m.json")
+        val log = MessageLog(file)
+        log.add(notice("alt", 5))
+        log.add(notice("pub:20:e1", 20).copy(via = "radar", message = "aus dem Lagebericht"))
+        assertTrue(log.find("pub:20:e1")!!.fallback)
+        // Ohne Auftrag zum Ersetzen bleibt der Eintrag, wie er ist.
+        assertFalse(log.add(notice("pub:20:e1", 20)))
+        assertTrue(log.find("pub:20:e1")!!.fallback)
+        // Die geprüfte Zustellung über ntfy tritt an seine Stelle.
+        assertTrue(log.replace("pub:20:e1", notice("pub:20:e1", 20)))
+        assertEquals(listOf("pub:20:e1", "alt"), log.all().map { it.id })
+        assertFalse(log.find("pub:20:e1")!!.fallback)
+        assertEquals("Text pub:20:e1\nzweite Zeile", log.find("pub:20:e1")!!.message)
+        assertNull(log.find("gibt-es-nicht"))
+        // So steht es auch nach einem Neustart in der Datei.
+        assertEquals(listOf(false, false), MessageLog(file).all().map { it.fallback })
     }
 
     @Test

@@ -270,6 +270,110 @@ class FallbackTest {
         assertEquals(emptyList<String>(), missing(listOf(item.copy(handedOver = true)), listOf(delivered)))
     }
 
+    // ------------------------------------------------------- öffentlicher Alarm
+
+    /** Ein Lagebericht mit dem Abschnitt "public", wie ihn ein Radar mit öffentlichem Alarm schreibt. */
+    private fun report(public: String?, notices: String): String =
+        "{" + (if (public == null) "" else "\"public\":$public,") + "\"notices\":[$notices]}"
+
+    private val sending = """{"enabled":true,"server":"https://ntfy.sh","topic":"blackout-radar-alarm","key":"k1"}"""
+    private val silent = """{"enabled":false,"server":"https://ntfy.sh","topic":"blackout-radar-alarm","key":null,
+        "problem":"ALARM_KEY fehlt"}"""
+
+    private val rows = """
+        {"key":"e1:start","t":"2026-11-27T17:00:00Z","title":"Blackout: Österreich","body":"Seit 18:00 Uhr",
+         "level":"alarm","scope":"all","delivered":["ntfy","email","public"],"pending":[]},
+        {"key":"e1:update","t":"2026-11-27T17:20:00Z","title":"Update Österreich: dauert an","body":"",
+         "level":"info","scope":"all","delivered":["ntfy"],"pending":["public"]},
+        {"key":"betrieb:quelle","t":"2026-11-27T17:25:00Z","title":"Datenquelle gestört","body":"x",
+         "level":"warn","scope":"operator","delivered":["ntfy"],"pending":[]},
+        {"key":"daily:2026-11-27","t":"2026-11-27T06:00:00Z","title":"Lagebericht","body":"x",
+         "level":"daily","scope":"all","delivered":["ntfy","email"],"pending":[]},
+        {"key":"alt","t":"2026-11-27T17:30:00Z","title":"Ohne Angabe, für wen","body":"x",
+         "level":"info","delivered":["ntfy","public"],"pending":[]}"""
+
+    @Test
+    fun oeffentlicherAlarmZaehltNurWasFuerAlleGedachtIst() {
+        val list = Fallback.parse(report(sending, rows), public = true)!!
+        // Meldungen über den Betrieb gehen nur an den Betreiber. Was der Radar gar nicht an den öffentlichen
+        // Alarm schicken wollte (hier die tägliche Übersicht), fehlt dort auch nicht.
+        assertEquals(listOf("e1:start", "e1:update"), list.map { it.key })
+        assertTrue(list.all { it.public })
+        assertTrue(list[0].handedOver)
+        // Noch im Postausgang des Radars: nicht an ntfy übergeben.
+        assertFalse(list[1].handedOver)
+        assertEquals(t0, list[0].time)
+        assertEquals("alarm", list[0].level)
+
+        // Dasselbe für das eigene Thema gelesen: Dort zählt, was an ntfy ging, auch die Meldung an den Betreiber.
+        val own = Fallback.parse(report(sending, rows))!!
+        assertEquals(listOf("e1:start", "e1:update", "betrieb:quelle", "daily:2026-11-27", "alt"), own.map { it.key })
+        assertTrue(own.none { it.public })
+        assertTrue(own.all { it.handedOver })
+    }
+
+    @Test
+    fun radarOhneOeffentlichenAlarmLaesstDenNotwegRuhen() {
+        // Ein Radar, der den öffentlichen Alarm noch nicht kennt, führt den Abschnitt "public" nicht.
+        assertNull(Fallback.parse(report(null, rows), public = true))
+        assertNull(Fallback.parse("""{"public":"ja","notices":[]}""", public = true))
+        assertNull(Fallback.parse("""{"public":{"enabled":true}}""", public = true))
+        assertEquals(emptyList<Posted>(), Fallback.parse(report(sending, ""), public = true))
+        // Für das eigene Thema spielt der Abschnitt keine Rolle.
+        assertEquals(5, Fallback.parse(report(null, rows))!!.size)
+    }
+
+    @Test
+    fun sendetDerRadarNichtZeigtDieAppAllesSelbst() {
+        // Der Schlüssel fehlt oder passt nicht: Der Radar schickt nichts an den öffentlichen Alarm und nennt den
+        // Kanal bei keiner Meldung. Dann gilt jede Meldung für alle als nicht übergeben.
+        val list = Fallback.parse(report(silent, rows), public = true)!!
+        assertEquals(listOf("e1:start", "e1:update", "daily:2026-11-27"), list.map { it.key })
+        // Was der Radar früher noch übergeben hat, bleibt übergeben. Alles andere zeigt die App selbst.
+        assertEquals(listOf(true, false, false), list.map { it.handedOver })
+        assertEquals(emptyList<Posted>(), Fallback.parse(report("{}", rows.replace("\"all\"", "\"operator\"")), public = true))
+        assertEquals(3, Fallback.parse(report("{}", rows), public = true)!!.size)
+    }
+
+    @Test
+    fun kennungBeimOeffentlichenAlarm() {
+        val list = Fallback.parse(report(sending, rows), public = true)!!
+        assertEquals("pub:$t0:e1:start", list[0].id)
+        assertEquals(PublicAlarm.id(t0 + 20 * minute, "e1:update"), list[1].id)
+        val notice = Fallback.notice(list[1], Fallback.VIA_RADAR, "https://example.org/status.md")
+        assertEquals(list[1].id, notice.id)
+        assertTrue(notice.public)
+        assertTrue(notice.fallback)
+        assertTrue(notice.message.contains("Lagebericht"))
+        // Dieselbe Meldung für das eigene Thema gelesen trägt die Kennung des Notwegs.
+        assertEquals("notweg:$t0:e1:start", Fallback.parse(report(sending, rows))!![0].id)
+    }
+
+    @Test
+    fun beimOeffentlichenAlarmEntscheidetDieKennung() {
+        val list = Fallback.parse(report(sending, rows), public = true)!!
+        fun missing(log: List<Notice>, setup: Long = t0 - hour, now: Long = t0 + hour) =
+            Fallback.missingPublic(list, log, setup, now).map { it.key }
+
+        assertEquals(listOf("e1:start", "e1:update"), missing(emptyList()))
+        // Über ntfy angekommen und geprüft: Die Meldung steht unter derselben Kennung in der Liste.
+        val arrived = Notice(PublicAlarm.id(t0, "e1:start"), t0, "Blackout: Österreich", "Seit 18:00 Uhr", 5, listOf("rotating_light"), "")
+        assertEquals(listOf("e1:update"), missing(listOf(arrived)))
+        // Schon über den Notweg gezeigt: läutet nicht noch einmal.
+        val shown = Fallback.notice(list[1], Fallback.VIA_RADAR, "")
+        assertEquals(emptyList<String>(), missing(listOf(arrived, shown)))
+        // Titel und Zeit einer fremden Zeile zählen nicht, nur die Kennung.
+        val other = arrived.copy(id = "pub:${t0 + 1}:e1:start")
+        assertEquals(listOf("e1:start", "e1:update"), missing(listOf(other)))
+
+        // Vorgeschichte und Altes bleiben liegen, wie beim eigenen Thema.
+        assertEquals(listOf("e1:update"), missing(emptyList(), setup = t0 + 1))
+        assertEquals(emptyList<String>(), missing(emptyList(), setup = t0 + hour))
+        assertEquals(listOf("e1:update"), missing(emptyList(), setup = 0, now = t0 + Fallback.MAX_AGE_S + 1))
+        // Älteste zuerst, egal in welcher Reihenfolge der Lagebericht sie führt.
+        assertEquals(listOf("e1:start", "e1:update"), Fallback.missingPublic(list.reversed(), emptyList(), t0 - hour, t0 + hour).map { it.key })
+    }
+
     // ------------------------------------------------------------------ Anzeige
 
     @Test
@@ -315,5 +419,13 @@ class FallbackTest {
         val texts = listOf(Fallback.VIA_RADAR, Fallback.VIA_NET, Fallback.VIA_TOPIC, "neu").map { Fallback.reason(it) }
         assertTrue(texts.all { it.startsWith("Über den Notweg aus dem Lagebericht.") })
         assertEquals(4, texts.toSet().size)
+
+        // Beim öffentlichen Alarm gibt niemand ein Thema ein, es kann also auch nicht falsch sein.
+        assertTrue(Fallback.reason(Fallback.VIA_TOPIC).contains("Thema"))
+        val public = listOf(Fallback.VIA_RADAR, Fallback.VIA_NET, Fallback.VIA_TOPIC, "neu").map { Fallback.reason(it, public = true) }
+        assertTrue(public.all { it.startsWith("Über den Notweg aus dem Lagebericht.") })
+        assertTrue(public.none { it.contains("Thema") })
+        assertEquals(4, public.toSet().size)
+        assertEquals("", Fallback.reason("", public = true))
     }
 }

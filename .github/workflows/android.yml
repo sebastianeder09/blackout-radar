@@ -4,16 +4,28 @@ name: Android-App
 # Veröffentlicht wird nur aus dem Hauptzweig und nur, wenn alle Prüfungen bestanden sind.
 # Die neueste Fassung liegt immer unter
 # https://github.com/sebastianeder09/blackout-radar/releases/latest/download/blackout-radar.apk
+#
+# Dazu entsteht das Paket für Google Play (blackout-radar-play.aab, siehe android/README.md). Unterschrieben wird
+# es mit dem Upload-Schlüssel, sobald das Secret PLAY_UPLOAD_PASSWORD gesetzt ist. Hochgeladen wird es von Hand.
+#
+# Impressum und Datenschutzerklärung (docs/) stecken in der App, die Beispiele zur Unterschrift
+# (tests/data/unterschrift.json) prüfen ihre Tests: Auch eine Änderung dort baut die App neu.
 
 on:
   push:
     branches: [main]
     paths:
       - "android/**"
+      - "docs/impressum.md"
+      - "docs/datenschutz.md"
+      - "tests/data/unterschrift.json"
       - ".github/workflows/android.yml"
   pull_request:
     paths:
       - "android/**"
+      - "docs/impressum.md"
+      - "docs/datenschutz.md"
+      - "tests/data/unterschrift.json"
       - ".github/workflows/android.yml"
   workflow_dispatch:
 
@@ -41,22 +53,44 @@ jobs:
         with:
           gradle-version: "8.14.3"
 
+      # Der Testbau nimmt zusätzlich den Testschlüssel an, die fertige Fassung nie: Beide Fälle prüfen dieselben Tests.
       - name: Tests
         working-directory: android
-        run: gradle --no-daemon testDebugUnitTest
+        run: gradle --no-daemon testGithubDebugUnitTest testPlayReleaseUnitTest
 
-      - name: APK bauen
+      # Zwei Wege zum Handy, ein Programm: "github" ist die Installationsdatei aus diesem Repository, "play" das
+      # Paket für Google Play mit eigenem Paketnamen (android/app/build.gradle.kts).
+      - name: App bauen
         working-directory: android
-        run: gradle --no-daemon assembleRelease assembleDebug -PbuildNumber=${{ github.run_number }}
+        env:
+          PLAY_UPLOAD_PASSWORD: ${{ secrets.PLAY_UPLOAD_PASSWORD }}
+        run: >-
+          gradle --no-daemon assembleGithubRelease assembleGithubDebug assemblePlayDebug bundlePlayRelease
+          -PbuildNumber=${{ github.run_number }}
 
       - name: APK prüfen
         run: |
           mkdir -p apk
-          cp android/app/build/outputs/apk/release/app-release.apk apk/blackout-radar.apk
-          cp android/app/build/outputs/apk/debug/app-debug.apk apk/blackout-radar-test.apk
+          cp android/app/build/outputs/apk/github/release/app-github-release.apk apk/blackout-radar.apk
+          cp android/app/build/outputs/apk/github/debug/app-github-debug.apk apk/blackout-radar-test.apk
+          cp android/app/build/outputs/apk/play/debug/app-play-debug.apk apk/blackout-radar-play-test.apk
           tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           "$tools/apksigner" verify --print-certs apk/blackout-radar.apk | tee signatur.txt
-          "$tools/aapt2" dump badging apk/blackout-radar.apk | head -3
+          "$tools/aapt2" dump badging apk/blackout-radar.apk > angaben.txt
+          head -3 angaben.txt
+          # Paketname und Zertifikat der App von GitHub stehen fest. Mit einem anderen ließe sich keine neue Fassung
+          # mehr über die App spielen, die auf den Handys schon läuft.
+          grep -q "^package: name='io.github.sebastianeder09.blackoutradar' " angaben.txt
+          [ "$(grep -m1 'SHA-256' signatur.txt | awk '{print $NF}')" = e2db975031b745817b82ba1cf9afc48d97acfc40ebd467f40d719ee36b9fe402 ]
+          grep -q "^targetSdkVersion:'36'" angaben.txt
+          "$tools/aapt2" dump badging apk/blackout-radar-play-test.apk > angaben-play.txt
+          head -1 angaben-play.txt
+          grep -q "^package: name='at.ase_it.blackoutradar.debug' " angaben-play.txt
+          # Impressum und Datenschutzerklärung stecken in der App, Wort für Wort wie in docs/.
+          for text in impressum datenschutz; do
+            unzip -p apk/blackout-radar.apk "assets/rechtstexte/$text.md" | cmp - "docs/$text.md"
+            unzip -p apk/blackout-radar-play-test.apk "assets/rechtstexte/$text.md" | cmp - "docs/$text.md"
+          done
           # Die App gibt sich als Datei samt Thema weiter (ApkTopic.kt). Hier mit einem Platzhalter nachgestellt:
           # Die Signatur muss gültig bleiben, mit demselben Zertifikat, und die Datei darf nicht wachsen.
           python3 android/test/thema_datei.py schreiben apk/blackout-radar.apk "$RUNNER_TEMP/mit-thema.apk" beispiel-thema
@@ -73,12 +107,56 @@ jobs:
             echo "| SHA-256 | \`$(sha256sum apk/blackout-radar.apk | cut -d' ' -f1)\` |"
             echo "| Zertifikat | \`$(grep -m1 'SHA-256' signatur.txt | awk '{print $NF}')\` |"
             echo "| Datei mit Thema | Signatur gültig, gleiches Zertifikat, gleiche Größe |"
+            echo "| Ziel-API | $(grep -o "^targetSdkVersion:'[0-9]*'" angaben.txt | tr -dc 0-9) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Das Paket für Google Play. Mit dem Kennwort des Upload-Schlüssels ist es unterschrieben und lässt sich in
+      # der Play Console hochladen. Ohne das Kennwort entsteht es zur Probe und heißt auch so.
+      - name: Paket für Google Play prüfen
+        env:
+          PLAY_UPLOAD_PASSWORD: ${{ secrets.PLAY_UPLOAD_PASSWORD }}
+        run: |
+          mkdir -p play
+          bundle=android/app/build/outputs/bundle/playRelease/app-play-release.aab
+          unzip -l "$bundle" > inhalt.txt
+          for file in base/manifest/AndroidManifest.xml base/dex/classes.dex base/assets/www/app.js \
+            base/assets/rechtstexte/impressum.md base/assets/rechtstexte/datenschutz.md; do
+            grep -q " $file\$" inhalt.txt || { echo "Im Paket fehlt $file"; exit 1; }
+          done
+          if [ -n "$PLAY_UPLOAD_PASSWORD" ]; then
+            jarsigner -verify "$bundle" | tee signatur-play.txt
+            grep -q "jar verified" signatur-play.txt
+            keytool -printcert -jarfile "$bundle" | tee zertifikat-play.txt
+            # Das Zertifikat des Upload-Schlüssels aus android/keystore/play-upload.p12, siehe android/README.md
+            grep -q "F2:08:26:95:63:AD:0E:23:8D:B7:18:3B:05:12:02:03:1B:E5:19:96:73:6A:8B:3B:FD:F1:B6:1E:35:5E:B7:56" zertifikat-play.txt
+            cp "$bundle" play/blackout-radar-play.aab
+            state="unterschrieben mit dem Upload-Schlüssel, bereit für die Play Console"
+          else
+            cp "$bundle" play/blackout-radar-play-ohne-unterschrift.aab
+            state="ohne Unterschrift, das Secret PLAY_UPLOAD_PASSWORD fehlt"
+          fi
+          {
+            echo
+            echo "## Paket für Google Play"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Paketname | \`at.ase_it.blackoutradar\` |"
+            echo "| Fassung | 1.${{ github.run_number }} (Nummer ${{ github.run_number }}) |"
+            echo "| Größe | $(du -k "$bundle" | cut -f1) KB |"
+            echo "| Stand | $state |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v6
         with:
           name: apk
           path: apk/
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: play
+          path: play/
           retention-days: 30
 
   emulator:
@@ -89,7 +167,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [31, 35]
+        api: [31, 35, 36]
     steps:
       - uses: actions/checkout@v5
 
@@ -157,11 +235,25 @@ jobs:
           name: apk
           path: apk
 
+      - uses: actions/download-artifact@v7
+        with:
+          name: play
+          path: play
+
+      # Das Paket für Google Play kommt nur dazu, wenn es unterschrieben ist.
       - name: Download anlegen
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "app-v${{ github.run_number }}" apk/blackout-radar.apk \
+          files=(apk/blackout-radar.apk)
+          notes="Android-App zum Blackout-Radar. Die Datei blackout-radar.apk auf dem Handy herunterladen, antippen und installieren. Eine ältere Fassung wird dabei ersetzt, Thema und Einstellungen bleiben erhalten. Anleitung: android/README.md"
+          if [ -f play/blackout-radar-play.aab ]; then
+            files+=(play/blackout-radar-play.aab)
+            notes="$notes
+
+          Die Datei blackout-radar-play.aab ist dieselbe Fassung als Paket für Google Play. Sie lässt sich nicht am Handy installieren, sie wird in der Play Console hochgeladen."
+          fi
+          gh release create "app-v${{ github.run_number }}" "${files[@]}" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
             --title "Blackout-Radar App 1.${{ github.run_number }}" \
-            --notes "Android-App zum Blackout-Radar. Auf dem Handy herunterladen, antippen und installieren. Eine ältere Fassung wird dabei ersetzt, Thema und Einstellungen bleiben erhalten. Anleitung: android/README.md"
+            --notes "$notes"

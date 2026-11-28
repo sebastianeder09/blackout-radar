@@ -9,11 +9,21 @@ Lagebericht:
   GET  /status.json, /status.md
 
 Radar, nur für die Prüfung. Dahinter läuft der echte Versand des Radars (blackout_radar.notify) mit seinem
-Postausgang. Was im Lagebericht unter "notices" steht, kommt also aus demselben Code wie im Betrieb:
-  POST /radar/meldung   {"title", "body", "level"}  Der Radar erstellt eine Meldung und versucht sie zuzustellen.
+Postausgang. Was im Lagebericht unter "notices" steht, kommt also aus demselben Code wie im Betrieb. Der Radar
+schickt jede Meldung an sein eigenes Thema ("testthema") und, wenn sie für alle gedacht ist, mit Unterschrift an
+das Thema des öffentlichen Alarms ("alarm-test"). Er unterschreibt mit dem Testschlüssel (siehe fixtures.py):
+  POST /radar/meldung   {"title", "body", "level", "scope": "all"}
+                        Der Radar erstellt eine Meldung und versucht sie zuzustellen. Mit "scope": "operator"
+                        betrifft sie nur den Betrieb des Radars und geht nicht an den öffentlichen Alarm.
   POST /radar/lauf      {"minuten_spaeter": 0}      Der nächste Lauf: Der Radar versucht den Postausgang noch einmal.
   POST /schalter        {"radar_erreicht_ntfy": true, "handy_erreicht_ntfy": true, "thema_des_radars": "testthema"}
                         Stellt Störungen nach. Jede Angabe ist freiwillig.
+
+Ein Fremder, nur für die Prüfung. In das öffentliche Thema kann jeder schreiben:
+  POST /fremder         {"art": "ohne" | "text" | "titel" | "wiederholung"}
+                        "ohne": eine Meldung ohne Unterschrift. "text" und "titel": die Unterschrift der letzten
+                        echten Meldung unter einem anderen Text oder Titel. "wiederholung": die letzte echte
+                        Meldung noch einmal, unverändert. Die App darf bei keiner davon läuten.
 
   python3 android/test/fake_ntfy.py <ordner> [port]
 
@@ -33,13 +43,14 @@ from urllib.parse import parse_qs, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import fixtures  # noqa: E402
-from blackout_radar import config, report  # noqa: E402
+from blackout_radar import config, report, sign  # noqa: E402
 from blackout_radar.model import Message, iso, now_utc  # noqa: E402
 from blackout_radar.notify import Notifier  # noqa: E402
 
 FOLDER = Path(sys.argv[1])
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
-TOPIC = "testthema"
+TOPIC = fixtures.TOPIC
+PUBLIC_TOPIC = fixtures.PUBLIC_TOPIC
 MESSAGES: list[dict] = json.loads((FOLDER / "meldungen.json").read_text(encoding="utf-8"))
 LOCK = threading.Condition()
 SWITCH = {"radar_erreicht_ntfy": True, "handy_erreicht_ntfy": True, "thema_des_radars": TOPIC}
@@ -49,6 +60,7 @@ CFG = config.load(str(Path(__file__).resolve().parents[2] / "config.toml"))
 CFG["status_url"] = fixtures.STATUS_URL
 CFG["notify"]["ntfy"].update(enabled=True, server=f"http://127.0.0.1:{PORT}", topic=TOPIC, token="")
 CFG["notify"]["email"]["enabled"] = False
+CFG["notify"]["public"] = fixtures.public_cfg(f"http://127.0.0.1:{PORT}")
 STATE: dict = json.loads((FOLDER / "zustand.json").read_text(encoding="utf-8"))
 RADAR = threading.Lock()  # immer nur ein Lauf des Radars zur selben Zeit
 BODIES: dict[str, str] = {}
@@ -67,7 +79,7 @@ def radar_notices() -> list[dict]:
         return listed if listed is not None else fixtures.notices(STATE, BODIES)
 
 
-def radar_post(title: str, body: str, level: str) -> dict:
+def radar_post(title: str, body: str, level: str, scope: str = "all") -> dict:
     """Der Radar erstellt eine Meldung und versucht sofort, sie zuzustellen."""
     global COUNTER
     with RADAR:
@@ -76,7 +88,7 @@ def radar_post(title: str, body: str, level: str) -> dict:
         key = f"pruefung:{iso(now)}:{COUNTER}"
         BODIES[key] = body
         notifier = Notifier(CFG, STATE)
-        notifier.queue([Message(title, body, level, key, fixtures.STATUS_URL)], now)
+        notifier.queue([Message(title, body, level, key, fixtures.STATUS_URL, scope)], now)
         delivered = notifier.flush(now)
     return {"key": key, "zugestellt": delivered, "wartet": len(STATE.get("outbox") or [])}
 
@@ -86,6 +98,25 @@ def radar_run(minutes_later: int) -> dict:
     with RADAR:
         delivered = Notifier(CFG, STATE).flush(now_utc() + timedelta(minutes=minutes_later))
     return {"zugestellt": delivered, "wartet": len(STATE.get("outbox") or [])}
+
+
+def stranger(kind: str) -> dict | None:
+    """Ein Fremder schreibt in das öffentliche Thema. Liefert, was er geschickt hat, oder None bei unbekannter Art."""
+    if kind == "ohne":
+        return publish(PUBLIC_TOPIC, "Falscher Alarm", "Diese Meldung trägt keine Unterschrift.", 5, ["rotating_light"])
+    key = sign.parse_key(CFG["notify"]["public"]["key"])
+    with LOCK:  # echt ist, was der Radar unterschrieben hat, nicht was nur so aussieht
+        real = [m for m in MESSAGES if m["topic"] == PUBLIC_TOPIC
+                and sign.unseal({key.kid: key.public_hex}, PUBLIC_TOPIC, m["title"], m["message"], m.get("click", ""))]
+    if not real or kind not in ("text", "titel", "wiederholung"):
+        return None
+    last = real[-1]
+    title, message = last["title"], last["message"]
+    if kind == "text":
+        message = sign.attach("Falscher Alarm: fremder Text unter einer echten Unterschrift.", sign.split(message)[1])
+    elif kind == "titel":
+        title = "Falscher Alarm unter echter Unterschrift"
+    return publish(PUBLIC_TOPIC, title, message, last["priority"], last["tags"], last.get("click", ""))
 
 
 def since_filter(topic: str, since: str) -> list[dict]:
@@ -188,7 +219,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):  # noqa: N802
         path = urlsplit(self.path).path.strip("/")
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
-        if path in ("", "radar/meldung", "radar/lauf", "schalter"):
+        if path in ("", "radar/meldung", "radar/lauf", "schalter", "fremder"):
             try:
                 data = json.loads(body or "{}")
             except ValueError:
@@ -201,9 +232,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, publish(data["topic"], data.get("title", ""), data.get("message", ""),
                                             int(data.get("priority") or 3), data.get("tags") or [], data.get("click", "")))
             elif path == "radar/meldung":
-                self.send_json(200, radar_post(data["title"], data.get("body", ""), data.get("level", "info")))
+                self.send_json(200, radar_post(data["title"], data.get("body", ""), data.get("level", "info"),
+                                               data.get("scope") or "all"))
             elif path == "radar/lauf":
                 self.send_json(200, radar_run(int(data.get("minuten_spaeter") or 0)))
+            elif path == "fremder":
+                sent = stranger(str(data.get("art") or ""))
+                self.send_json(200 if sent else 400, sent or {"fehler": "unbekannte Art oder noch keine echte Meldung"})
             else:
                 with LOCK:
                     SWITCH.update({name: value for name, value in data.items() if name in SWITCH})

@@ -218,7 +218,7 @@ class ListenerService : Service() {
                     if (event is StreamEvent.Message) {
                         acquireWake(20_000L)
                         try {
-                            Sync.deliver(this, event.notice)
+                            Sync.deliver(this, target, event.notice)
                         } finally {
                             releaseWake()
                         }

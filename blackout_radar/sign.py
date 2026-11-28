@@ -52,6 +52,9 @@ G = (0x6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296,
 
 KEY_FORMAT = re.compile(r"BRKEY1:([a-z0-9]{1,8}):([0-9a-f]{64})")
 LINE_FORMAT = re.compile(r"br1\.([A-Za-z0-9_-]{8,600})\.([A-Za-z0-9_-]{16,128})")
+# Die Zeit einer Meldung ist eine ganze Zahl von Sekunden seit 1970, kleiner als dieser Wert. So rechnet jede
+# Sprache mit ihr genau (auch eine, die nur Kommazahlen kennt).
+MAX_TIME = 1 << 53
 # Zeichen, die in einer Meldung nichts verloren haben (Steuerzeichen außer Zeilenumbruch und Tabulator)
 CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 LINE_BREAKS = re.compile(r"[\r\n\x0b\x0c\x1c-\x1e\x85  ]+")
@@ -311,14 +314,15 @@ def unseal(keys: dict[str, str], topic: str, title: str, message: str, click: st
         return None
     if not isinstance(fields, dict) or not isinstance(fields.get("k"), str) or fields["k"] not in keys:
         return None
-    if not isinstance(fields.get("t"), int) or isinstance(fields["t"], bool):
+    if not isinstance(fields.get("t"), int) or isinstance(fields["t"], bool) or not 0 <= fields["t"] < MAX_TIME:
         return None
     if not isinstance(fields.get("l"), str) or not isinstance(fields.get("i"), str):
         return None
     try:
         point = parse_point(keys[fields["k"]])
-    except ValueError:
+        data = signing_input(topic, meta, title, click, body)
+    except ValueError:  # auch: ein halbes Zeichenpaar im Text, das sich nicht als UTF-8 schreiben lässt
         return None
-    if not verify(point, signing_input(topic, meta, title, click, body), raw):
+    if not verify(point, data, raw):
         return None
     return {**fields, "body": body}

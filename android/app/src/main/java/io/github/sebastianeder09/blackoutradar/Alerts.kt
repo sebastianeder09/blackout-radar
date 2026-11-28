@@ -107,7 +107,7 @@ object Alerts {
         val late = ageMs > 20 * 60_000L
         var body = if (late) "Verspätet angekommen (${MonitorWatch.age(ageMs)}).\n${notice.message}" else notice.message
         // Kam die Meldung über den Notweg, steht der Grund am Schluss. Vorn bleibt, was passiert ist.
-        if (notice.fallback) body += "\n\n" + Fallback.reason(notice.via)
+        if (notice.fallback) body += "\n\n" + Fallback.reason(notice.via, notice.public)
         val builder = Notification.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_stat_bolt)
             .setContentTitle(Ntfy.displayTitle(notice))
@@ -152,10 +152,11 @@ object Alerts {
         notify(context, ID_TEST, notification)
     }
 
-    /** Hinweis, dass der Radar selbst stillsteht. */
+    /** Hinweis, dass der Radar selbst stillsteht. Wer den öffentlichen Alarm nutzt, betreibt den Radar nicht selbst. */
     fun showStale(context: Context, generatedAtMs: Long, nowMs: Long) {
         val text = "Der letzte Lagebericht ist ${MonitorWatch.age(nowMs - generatedAtMs)} alt. " +
-            "Die Überwachung bei GitHub läuft vermutlich nicht, es kämen also auch keine Alarme."
+            if (PublicAlarm.active(Store.get(context))) "Der Radar läuft vermutlich gerade nicht. Solange kommen auch keine Alarme."
+            else "Die Überwachung bei GitHub läuft vermutlich nicht, es kämen also auch keine Alarme."
         val notification = Notification.Builder(context, CH_APP)
             .setSmallIcon(R.drawable.ic_stat_bolt)
             .setContentTitle("Der Blackout-Radar steht still")

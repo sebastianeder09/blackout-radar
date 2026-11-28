@@ -4,7 +4,8 @@ Spielt das Planspiel (Blackout in Österreich) bis zu einer gewählten Minute du
 es jetzt gerade so weit ist, und schreibt daraus:
 
   <ziel>/status.json, <ziel>/status.md   der Lagebericht in diesem Moment
-  <ziel>/meldungen.json                  die Meldungen bis dahin, so wie ntfy sie liefert
+  <ziel>/meldungen.json                  die Meldungen bis dahin, so wie ntfy sie liefert: unter dem eigenen Thema
+                                         und, mit Unterschrift, unter dem Thema des öffentlichen Alarms
   <ziel>/zustand.json                    der Zustand des Radars dazu, für fake_ntfy.py
 
 Aufruf aus dem Hauptordner des Repositorys:
@@ -22,9 +23,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from blackout_radar import config, report, simulate  # noqa: E402
 from blackout_radar.engine import Engine  # noqa: E402
 from blackout_radar.model import Signal, iso, now_utc  # noqa: E402
-from blackout_radar.notify import NTFY_PRIORITY, NTFY_TAGS  # noqa: E402
+from blackout_radar.notify import NTFY_PRIORITY, NTFY_TAGS, public_payload  # noqa: E402
+from tests.helpers import TEST_KEY  # noqa: E402
 
 STATUS_URL = "https://github.com/sebastianeder09/blackout-radar/blob/state/status.md"
+TOPIC = "testthema"
+# Das Thema des öffentlichen Alarms am nachgestellten Server. Das echte Thema bei ntfy.sh berührt die Prüfung nie.
+PUBLIC_TOPIC = "alarm-test"
+
+
+def public_cfg(server: str) -> dict:
+    """Der öffentliche Alarm des nachgestellten Radars.
+
+    Er unterschreibt mit dem Testschlüssel (tests/helpers.py). Dessen geheimer Teil ist allgemein bekannt,
+    deshalb nimmt ihn nur der Testbau der App an, die fertige App nie.
+    """
+    return {"enabled": True, "server": server, "topic": PUBLIC_TOPIC, "key": TEST_KEY, "token": "",
+            "skip_levels": [], "problem": ""}
 
 
 def play(cfg: dict, start, stop_minute: int):
@@ -86,17 +101,26 @@ def main() -> None:
     cfg["status_url"] = STATUS_URL
     end = now_utc().replace(second=0, microsecond=0)
     state, sent, now = play(cfg, end - timedelta(minutes=stop), stop)
-    state["sent"] = [{"t": iso(t), "title": m.title, "body": m.body, "level": m.level, "key": m.key,
-                      "channels": ["ntfy"], "failed": []} for t, m in reversed(sent)]
+    public = public_cfg("http://127.0.0.1:8765")
+    cfg["notify"]["public"] = public
+    for_all = [(t, m) for t, m in sent if m.scope == "all"]  # nur die gehen an den öffentlichen Alarm
+    state["sent"] = [{"t": iso(t), "title": m.title, "body": m.body, "level": m.level, "key": m.key, "scope": m.scope,
+                      "channels": ["ntfy", "public"] if m.scope == "all" else ["ntfy"], "failed": []}
+                     for t, m in reversed(sent)]
     rep = report.Report(cfg, state, now)
     (out / "status.md").write_text(rep.markdown(), encoding="utf-8")
     (out / "status.json").write_text(json.dumps(rep.snapshot(), ensure_ascii=False, indent=1), encoding="utf-8")
-    messages = [{"id": f"planspiel{i:04d}", "time": int(t.timestamp()), "event": "message", "topic": "testthema",
+    messages = [{"id": f"planspiel{i:04d}", "time": int(t.timestamp()), "event": "message", "topic": TOPIC,
                  "title": m.title, "message": m.body, "priority": NTFY_PRIORITY.get(m.level, 3),
                  "tags": NTFY_TAGS.get(m.level, []), "click": m.url} for i, (t, m) in enumerate(sent)]
+    # Dieselben Meldungen unter dem öffentlichen Thema, so wie der Radar sie dorthin schickt: mit Unterschrift.
+    for i, (t, m) in enumerate(for_all):
+        m.created = t
+        messages.append({"id": f"alarm{i:04d}", "time": int(t.timestamp()), "event": "message", **public_payload(public, m)})
     (out / "meldungen.json").write_text(json.dumps(messages, ensure_ascii=False, indent=1), encoding="utf-8")
     (out / "zustand.json").write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-    print(f"{len(messages)} Meldungen bis Minute {stop}, Lagebericht von {iso(now)}")
+    print(f"{len(sent)} Meldungen bis Minute {stop}, davon {len(for_all)} auch mit Unterschrift unter dem öffentlichen "
+          f"Thema, Lagebericht von {iso(now)}")
 
 
 if __name__ == "__main__":

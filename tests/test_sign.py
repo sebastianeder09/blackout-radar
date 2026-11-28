@@ -229,6 +229,8 @@ class Vectors(unittest.TestCase):
     def cases(self) -> list[dict]:
         body = "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)"
         title, click = "Blackout: Österreich", "https://example.org/status"
+        ident, created = "AT-20261126T1100:start:1", int(T0.timestamp())
+        key = sign.parse_key(TEST_KEY)
         good = sealed(title, body, click)
         text, line = sign.split(good)
         _, meta, signature = line.split(".")
@@ -241,19 +243,37 @@ class Vectors(unittest.TestCase):
         def case(name, message, valid, title=title, click=click, topic=TOPIC):
             return {"name": name, "topic": topic, "title": title, "click": click, "message": message, "valid": valid}
 
+        def ok(name, body=body, level="alarm", ident=ident, message=None, title=title, click=click, more=None):
+            """Ein gültiger Fall samt dem, was die Prüfung aus der Meldung lesen muss."""
+            message = sealed(title, body, click, level, ident) if message is None else message
+            expect = {"k": "test", "t": created, "l": level, "i": ident, **(more or {}), "body": body}
+            return {**case(name, message, True, title=title, click=click), "expect": expect}
+
+        def crafted(angaben: str, body=body) -> str:
+            """Eine Meldung mit frei gewählten Angaben, richtig unterschrieben: Nur ihr Inhalt entscheidet."""
+            packed = sign.b64(angaben.encode("utf-8"))
+            signed = sign.sign(key.d, sign.signing_input(TOPIC, packed, title, click, body))
+            return sign.attach(body, f"br1.{packed}.{sign.b64(signed)}")
+
+        def angaben(**change) -> str:
+            return json.dumps({**fields, **change}, ensure_ascii=False, separators=(",", ":"))
+
         return [
-            case("gültig", good, True),
-            case("gültig, ohne Link", sealed(title, body, ""), True, click=""),
-            case("gültig, ohne Text", sealed(title, "", click), True),
-            case("gültig, verspätet zugestellt",
-                 sealed(title, "Verspätet zugestellt, erstellt am 26.11. 12:00 Uhr.\n" + body, click), True),
-            case("gültig, tägliche Übersicht", sealed("Lagebericht 26.11.: keine größeren Stromausfälle",
-                                                      "Datenquellen: alle 4 in Ordnung.", click, "daily",
-                                                      "daily:2026-11-26"),
-                 True, title="Lagebericht 26.11.: keine größeren Stromausfälle"),
-            case("gültig, zweite Form derselben Unterschrift",
-                 sign.attach(text, f"br1.{meta}.{sign.b64(sign.der(r, sign.N - s))}"), True),
-            case("gültig, Zeile im Text zählt nicht", sealed(title, "Zitat:\n" + line + "\nEnde", click, "info"), True),
+            ok("gültig"),
+            ok("gültig, ohne Link", click=""),
+            ok("gültig, ohne Text", body=""),
+            ok("gültig, verspätet zugestellt", body="Verspätet zugestellt, erstellt am 26.11. 12:00 Uhr.\n" + body),
+            ok("gültig, tägliche Übersicht", body="Datenquellen: alle 4 in Ordnung.", level="daily",
+               ident="daily:2026-11-26", title="Lagebericht 26.11.: keine größeren Stromausfälle"),
+            ok("gültig, zweite Form derselben Unterschrift",
+               message=sign.attach(text, f"br1.{meta}.{sign.b64(sign.der(r, sign.N - s))}")),
+            ok("gültig, Zeile im Text zählt nicht", body="Zitat:\n" + line + "\nEnde", level="info"),
+            ok("gültig, Leerzeilen vor der Unterschrift", message=text + "\n\n\n\n" + line),
+            ok("gültig, Fragezeichen im Text", body="Lage unklar ? Näheres folgt"),
+            ok("gültig, Angaben in anderer Reihenfolge und mit Leerzeichen",
+               message=crafted(json.dumps({"i": ident, "l": "alarm", "t": created, "k": "test"}, indent=1))),
+            # Kommt später eine Angabe dazu, muss eine ältere App die Meldung weiter annehmen.
+            ok("gültig, zusätzliche Angabe", message=crafted(angaben(neu="später")), more={"neu": "später"}),
             case("Titel geändert", good, False, title="Entwarnung: Österreich"),
             case("Text geändert", good.replace("52 %", "5 %"), False),
             case("Link geändert", good, False, click="https://example.org/falle"),
@@ -261,12 +281,24 @@ class Vectors(unittest.TestCase):
             case("Dringlichkeit geändert", sign.attach(text, f"br1.{louder}.{quiet.rsplit('.', 1)[1]}"), False),
             case("ohne Unterschrift", body, False),
             case("Text nach der Unterschrift", good + "\nNachsatz", False),
-            case("unbekannter Schlüssel", sealed(title, body, click, key=sign.Key("k9", sign.parse_key(TEST_KEY).d)), False),
+            case("Zeilenenden geändert", good.replace("\n", "\r\n"), False),
+            case("unbekannter Schlüssel", sealed(title, body, click, key=sign.Key("k9", key.d)), False),
             case("fremder Schlüssel", sealed(title, body, click, key=other_key()), False),
             case("Felder verschoben", sign.attach(rest, line), False, title=title + "\n" + click, click=first),
             case("Unterschrift beschädigt", good[:-2] + ("A" if good[-2] != "A" else "B") + good[-1], False),
             case("Angaben kein JSON", sign.attach(text, f"br1.{sign.b64(b'kein json, nur text')}.{signature}"), False),
             case("nur Unsinn", "br1.x.y", False),
+            # Richtig unterschrieben, aber die Angaben haben nicht die verlangte Form.
+            case("Zeit als Text", crafted(angaben(t=str(created))), False),
+            case("Zeit als Kommazahl", crafted(angaben(t=created + 0.5)), False),
+            case("Zeit als Wahrheitswert", crafted(angaben(t=True)), False),
+            case("Zeit negativ", crafted(angaben(t=-1)), False),
+            case("Zeit zu groß", crafted(angaben(t=sign.MAX_TIME)), False),
+            case("Zeit fehlt", crafted(json.dumps({"k": "test", "l": "alarm", "i": ident})), False),
+            case("Dringlichkeit als Zahl", crafted(angaben(l=5)), False),
+            case("Schlüssel der Meldung fehlt", crafted(json.dumps({"k": "test", "t": created, "l": "alarm"})), False),
+            case("Schlüssel der Meldung ist null", crafted(angaben(i=None)), False),
+            case("Angaben sind eine Liste", crafted(json.dumps(["test", created, "alarm", ident])), False),
         ]
 
     def test_file_is_current(self):
@@ -280,9 +312,26 @@ class Vectors(unittest.TestCase):
                          "tests/data/unterschrift.json ist veraltet: UPDATE_VECTORS=1 python3 -m unittest tests.test_sign")
 
     def test_cases(self):
-        for case in json.loads(VECTORS.read_text(encoding="utf-8"))["cases"]:
+        cases = json.loads(VECTORS.read_text(encoding="utf-8"))["cases"]
+        self.assertEqual(len({case["name"] for case in cases}), len(cases))
+        for case in cases:
             result = sign.unseal(KEYS, case["topic"], case["title"], case["message"], case["click"])
             self.assertEqual(result is not None, case["valid"], case["name"])
+            self.assertEqual(result, case.get("expect"), case["name"])
+
+    def test_largest_time_is_accepted(self):
+        message = sealed(created=sign.MAX_TIME - 1)
+        self.assertEqual(sign.unseal(KEYS, TOPIC, "Blackout: Österreich", message, "https://example.org/status")["t"],
+                         sign.MAX_TIME - 1)
+
+    def test_broken_text_is_refused_not_repaired(self):
+        # Ein halbes Zeichenpaar lässt sich nicht als UTF-8 schreiben. Würde es beim Prüfen stillschweigend zu
+        # einem Fragezeichen, gälte die Unterschrift einer Meldung mit Fragezeichen auch für die veränderte.
+        case = next(c for c in self.cases() if c["name"] == "gültig, Fragezeichen im Text")
+        changed = case["message"].replace("?", "\ud83d")
+        self.assertNotEqual(changed, case["message"])
+        self.assertIsNone(sign.unseal(KEYS, case["topic"], case["title"], changed, case["click"]))
+        self.assertIsNone(sign.unseal(KEYS, case["topic"], case["title"] + "\udc00", case["message"], case["click"]))
 
 
 if __name__ == "__main__":

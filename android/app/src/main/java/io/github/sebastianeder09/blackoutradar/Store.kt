@@ -101,6 +101,11 @@ class Store private constructor(context: Context) {
         get() = prefs.getBoolean("askedPermissions", false)
         set(value) = prefs.edit().putBoolean("askedPermissions", value).apply()
 
+    /** Nur im Testbau: anderes Ziel für den öffentlichen Alarm, etwa der nachgestellte Server (siehe [PublicAlarm]). */
+    var publicOverride: String?
+        get() = prefs.getString("publicTarget", null)
+        set(value) = prefs.edit().putString("publicTarget", value).apply()
+
     /** Nur im Testbau: andere Adresse für den Lagebericht. */
     var statusBaseOverride: String?
         get() = prefs.getString("statusBase", null)

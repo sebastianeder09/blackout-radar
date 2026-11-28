@@ -20,20 +20,24 @@ class MessageLog(private val file: File, private val limit: Int = 300) {
     @Synchronized
     fun newestId(): String? = load().firstOrNull()?.id
 
+    @Synchronized
+    fun find(id: String): Notice? = load().firstOrNull { it.id == id }
+
     /** Nimmt die Meldung auf. Liefert false, wenn sie schon bekannt ist. */
     @Synchronized
     fun add(notice: Notice): Boolean = put(notice, null)
 
     /**
      * Nimmt die Meldung auf und entfernt dafür den Eintrag [oldId]: dieselbe Meldung, die vorher
-     * auf einem anderen Weg gekommen war. Liefert false, wenn die Meldung schon bekannt ist.
+     * auf einem anderen Weg gekommen war. Liefert false, wenn die Meldung schon unter einer anderen
+     * Kennung bekannt ist. Trägt sie dieselbe Kennung wie der alte Eintrag, tritt sie an seine Stelle.
      */
     @Synchronized
     fun replace(oldId: String, notice: Notice): Boolean = put(notice, oldId)
 
     private fun put(notice: Notice, dropId: String?): Boolean {
         val list = load()
-        if (list.any { it.id == notice.id }) return false
+        if (list.any { it.id == notice.id && it.id != dropId }) return false
         if (dropId != null) list.removeAll { it.id == dropId }
         var index = list.indexOfFirst { it.time <= notice.time }
         if (index < 0) index = list.size

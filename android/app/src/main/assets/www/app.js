@@ -24,6 +24,9 @@
     open: loadOpen(),  // offene Abschnitte des Lageberichts
     expanded: new Set(),
     setup: { busy: false, error: '', result: null, value: '', fromLink: false },
+    page: 'welcome',   // ohne Ziel: 'welcome' (Alarm einschalten) oder 'private' (eigenen Radar verbinden)
+    legal: null,       // offene Unterseite: 'impressum' oder 'datenschutz'
+    backArmed: false,  // was die App über die Zurück-Geste zuletzt erfahren hat
     modal: null,
     shell: null,
     refreshTimer: 0,
@@ -47,6 +50,12 @@
     paste: '<svg viewBox="0 0 24 24"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>',
     wifi: '<svg viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5 12.9a10 10 0 0 1 14 0"/><path d="M8.5 16.4a5 5 0 0 1 7 0"/></svg>',
     share: '<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></svg>',
+    back: '<svg viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>',
+    firma: '<svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>',
+    globe: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>',
+    call: '<svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z"/></svg>',
+    mail: '<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>',
+    clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>',
   };
   // Das Zeichen der App, als Kachel mit runden Ecken. Es ist vom Logo des Betreibers abgeleitet: die zweigeteilte
   // Pille mit dem Verlauf, an der Stelle des Spalts steht der Blitz. LOGO für die Kopfzeile (ohne Schrift, die wäre
@@ -65,6 +74,8 @@
     '</svg>';
 
   const LEVEL_NAME = { alarm: 'Alarm', warn: 'Warnung', ok: 'Entwarnung', info: 'Meldung', daily: 'Übersicht' };
+  const TABS = ['lage', 'meldungen', 'app', 'firma'];
+  const LEGAL_TITLE = { impressum: 'Impressum', datenschutz: 'Datenschutz' };
   const OPEN_DEFAULT = { 'Laufende Ereignisse': true, 'Kürzlich beendet': true };
 
   // ------------------------------------------------------------------- Helfer
@@ -231,7 +242,28 @@
     } else {
       renderMain();
     }
+    renderLegal();
     renderModal();
+  }
+
+  /** Der Name des Anbieters, so wie ihn die App führt. */
+  const brandName = () => (S.st && S.st.brand && S.st.brand.name) || '';
+
+  /**
+   * Sagt der App, ob die Zurück-Geste gerade in der Seite etwas zu tun hat: einen Dialog oder eine Unterseite
+   * schließen, zur Willkommensseite oder zum Tab "Lage" zurück. Sonst schließt die Geste die App. Ab Android 13
+   * muss die App das vor der Geste wissen, nicht erst in ihrem Augenblick.
+   */
+  function armBack() {
+    const armed = !!(S.modal || S.legal || (S.shell ? S.tab !== 'lage' : canLeavePrivate()));
+    if (armed === S.backArmed) return;
+    S.backArmed = armed;
+    N.backArmed(armed);
+  }
+
+  /** Auf der Seite "Eigenen Radar verbinden", solange dort nichts läuft: Zurück führt zur Willkommensseite. */
+  function canLeavePrivate() {
+    return S.page === 'private' && !S.setup.busy && !S.setup.result && !(S.st && S.st.hasTopic);
   }
 
   function renderMain() {
@@ -252,13 +284,15 @@
     const todo = !st.perms.notifications || !st.perms.battery || st.perms.alarmMuted || st.update.available;
     sh.appDot.hidden = !todo;
 
-    for (const name of ['lage', 'meldungen', 'app']) {
+    for (const name of TABS) {
       sh.tabs[name].setAttribute('aria-selected', String(S.tab === name));
       sh.views[name].hidden = S.tab !== name;
     }
     if (S.tab === 'lage') renderLage(sh.views.lage);
     else if (S.tab === 'meldungen') renderMessages(sh.views.meldungen);
+    else if (S.tab === 'firma') renderFirma(sh.views.firma);
     else renderApp(sh.views.app);
+    armBack();
   }
 
   function buildShell() {
@@ -268,10 +302,12 @@
     sh.pill = el('button', { class: 'pill', onclick: () => showTab('app'), 'aria-label': 'Verbindung' });
     sh.refresh = el('button', { class: 'icon-btn', 'aria-label': 'Aktualisieren', onclick: onRefresh }, icon('refresh'));
     const top = el('header', { class: 'top' },
-      el('div', { class: 'brand', html: LOGO }, el('h1', { text: 'Blackout-Radar' })),
+      el('div', { class: 'brand', html: LOGO },
+        el('div', { class: 'brand-text' }, el('h1', { text: 'Blackout-Radar' }),
+          brandName() ? el('span', { class: 'by', text: 'von ' + brandName() }) : null)),
       sh.pill, sh.refresh);
     const main = el('main');
-    for (const name of ['lage', 'meldungen', 'app']) {
+    for (const name of TABS) {
       sh.views[name] = el('section', { class: 'view', 'aria-label': name });
       main.append(sh.views[name]);
     }
@@ -285,6 +321,7 @@
     tab('lage', 'Lage', 'lage');
     tab('meldungen', 'Meldungen', 'bell');
     tab('app', 'App', 'phone');
+    tab('firma', 'Über uns', 'firma');
     sh.appDot = el('span', { class: 'badge-dot', hidden: true });
     sh.tabs.app.append(sh.appDot);
     app.append(top, main, nav);
@@ -370,8 +407,10 @@
     if (stale) {
       v.append(note('warn', 'alert', [
         el('p', null, el('b', { text: 'Der Lagebericht ist ' + span(age) + ' alt.' }),
-          ' Die Überwachung bei GitHub läuft vermutlich nicht, es kämen also auch keine Alarme.'),
-        el('div', { class: 'note-actions' },
+          st.public ? ' Der Radar läuft vermutlich gerade nicht, es kämen also auch keine Alarme.'
+            : ' Die Überwachung bei GitHub läuft vermutlich nicht, es kämen also auch keine Alarme.'),
+        // Nachsehen und neu starten kann nur, wer den Radar betreibt.
+        st.public ? null : el('div', { class: 'note-actions' },
           el('button', { class: 'btn', onclick: () => N.openUrl(actionsUrl()) }, 'Bei GitHub nachsehen', icon('ext')))]));
     }
 
@@ -389,7 +428,15 @@
 
     v.append(el('div', { class: 'foot' },
       el('div', { text: 'Lagebericht des Blackout-Radars, alle 5 Minuten neu.' }),
-      el('button', { onclick: () => N.openUrl(statusUrl()) }, 'Bei GitHub öffnen')));
+      el('button', { onclick: () => N.openUrl(statusUrl()) }, 'Bei GitHub öffnen'),
+      byline()));
+  }
+
+  /** Wer hinter dem Dienst steht, als unaufdringliche Zeile. Ein Tipp führt zu "Über uns". */
+  function byline() {
+    if (!brandName()) return null;
+    return el('button', { class: 'byline', onclick: () => showTab('firma') },
+      el('span', { text: 'Ein Dienst von ' }), el('b', { text: brandName() }));
   }
 
   /** Aufklappbarer Hinweis, der beim Neuzeichnen offen bleibt, wenn er offen war. */
@@ -557,14 +604,16 @@
   /** Fett und Verweise aus Markdown, alles andere bleibt Text. */
   function inline(text) {
     const out = [];
-    const re = /\*\*(.+?)\*\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+    const re = /\*\*(.+?)\*\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g;
     let last = 0, m;
     while ((m = re.exec(text))) {
       if (m.index > last) out.push(text.slice(last, m.index));
       if (m[1] != null) out.push(el('strong', { text: m[1] }));
       else {
         const url = m[3];
-        out.push(el('a', { href: url, onclick: e => { e.preventDefault(); N.openUrl(url); } }, m[2]));
+        // Die einzige E-Mail-Adresse in den Texten der App ist die des Anbieters: Dafür öffnet sich das E-Mail-Programm.
+        const open = url.startsWith('mailto:') ? () => N.mailCompany('') : () => N.openUrl(url);
+        out.push(el('a', { href: url, onclick: e => { e.preventDefault(); open(); } }, m[2]));
       }
       last = re.lastIndex;
     }
@@ -662,8 +711,10 @@
     v.append(el('div', { class: 'card' },
       el('div', { class: 'status-line ' + state[0] }, el('span', { class: 'dot' }), el('b', { text: state[1] })),
       el('p', { class: 'small muted', text: (state[2] || '') + retry }),
-      el('div', { class: 'kv-plain' }, el('span', { text: 'Server' }), el('span', { text: st.server.replace(/^https?:\/\//, '') })),
-      el('div', { class: 'kv-plain' }, el('span', { text: 'Thema' }), el('span', { class: 'mono', text: st.topic })),
+      st.public ? el('div', { class: 'kv-plain' }, el('span', { text: 'Alarm' }), el('span', { text: 'Öffentlicher Alarm' })) : [
+        el('div', { class: 'kv-plain' }, el('span', { text: 'Server' }), el('span', { text: st.server.replace(/^https?:\/\//, '') })),
+        el('div', { class: 'kv-plain' }, el('span', { text: 'Thema' }), el('span', { class: 'mono', text: st.topic }))],
+      st.public ? el('div', { class: 'kv-plain' }, el('span', { text: 'Schutz' }), el('span', { text: 'Unterschrift des Radars geprüft' })) : null,
       el('div', { class: 'kv-plain' }, el('span', { text: 'Notweg' }), el('span', { text: fallbackState(st.fallback, now) })),
       c.state === 'connected' ? null : el('div', { class: 'stack' },
         el('button', { class: 'btn', onclick: () => { N.reconnect(); toast('Verbindung wird neu aufgebaut …'); } }, icon('refresh'), 'Jetzt neu verbinden')),
@@ -671,7 +722,13 @@
         el('ul', null,
           el('li', { text: 'Der Radar führt im Lagebericht bei GitHub, welche Meldungen er verschickt hat. Die App vergleicht das etwa alle 15 Minuten mit dem, was über ntfy angekommen ist. Erreicht sie ntfy nicht, sieht sie etwa alle 5 Minuten nach.' }),
           el('li', { text: 'Fehlt eine Meldung, holt die App sie aus dem Lagebericht und meldet sich selbst, mit derselben Dringlichkeit. In der Liste trägt sie dann das Kennzeichen „Notweg“.' }),
-          el('li', { text: 'Das hilft, wenn ntfy ausfällt, wenn der Radar dort nichts loswird oder wenn das Thema an diesem Handy nicht stimmt. Der Notweg ist langsamer als der Push: meist einige Minuten, im ungünstigen Fall rund 20 Minuten. Ohne Internet am Handy hilft auch er nicht.' })))));
+          el('li', { text: 'Das hilft, wenn ntfy ausfällt' + (st.public ? ' oder wenn der Radar dort nichts loswird.'
+            : ', wenn der Radar dort nichts loswird oder wenn das Thema an diesem Handy nicht stimmt.') +
+            ' Der Notweg ist langsamer als der Push: meist einige Minuten, im ungünstigen Fall rund 20 Minuten. Ohne Internet am Handy hilft auch er nicht.' }))),
+      st.public ? more('schutz', 'Kann jemand einen falschen Alarm schicken?',
+        el('ul', null,
+          el('li', { text: 'Nein. Jede Meldung des Radars trägt eine Unterschrift. Die App prüft sie und verwirft alles andere still: Es erscheint weder als Benachrichtigung noch in der Liste.' }),
+          el('li', { text: 'Auch Dringlichkeit und Zeit einer Meldung stammen aus den unterschriebenen Angaben. Eine alte echte Meldung, die jemand noch einmal einspielt, läutet nicht ein zweites Mal.' }))) : null));
 
     // Erlaubnisse
     const p = st.perms;
@@ -712,19 +769,22 @@
       el('h3', { text: 'Alarm' }),
       toggle('loudAlarm', 'Laut, auch bei Lautlos', 'Ein großer Stromausfall in Österreich läutet über die Wecker-Lautstärke, auch bei „Nicht stören“.'),
       toggle('repeatAlarm', 'Alarmton wiederholen', 'Läutet weiter, bis du die Meldung öffnest oder wegwischst.'),
-      toggle('watchMonitor', 'Warnen, wenn der Radar stillsteht', 'Meldung, wenn bei GitHub seit 3 Stunden kein neuer Lagebericht entstanden ist.'),
+      toggle('watchMonitor', 'Warnen, wenn der Radar stillsteht', st.public
+        ? 'Meldung, wenn der Radar seit 3 Stunden keinen neuen Lagebericht geliefert hat.'
+        : 'Meldung, wenn bei GitHub seit 3 Stunden kein neuer Lagebericht entstanden ist.'),
       el('div', { class: 'stack' },
         el('button', { class: 'btn', onclick: testAlarm }, icon('zap'), 'Probealarm auf diesem Handy'),
         el('button', { class: 'btn', onclick: () => N.openNotificationSettings() }, 'Töne und Kanäle in Android einstellen')),
-      more('test', 'Testmeldung über den ganzen Weg',
+      st.public ? null : more('test', 'Testmeldung über den ganzen Weg',
         el('ul', null,
           el('li', { text: 'Der Probealarm prüft nur Ton und Anzeige auf dem Handy. Für den ganzen Weg vom Radar über ntfy bis hierher: bei GitHub unter Actions → Blackout-Radar → Run workflow die Aktion „test-push“ starten.' }),
           el('li', null, el('a', { href: '#', onclick: e => { e.preventDefault(); N.openUrl(actionsUrl()); } }, 'Actions bei GitHub öffnen'))))));
 
     // Weitere Handys. Zwei Wege: die App als Datei, die das Thema schon enthält, oder eine Nachricht mit Download und Thema.
-    const byMessage = 'Am anderen Handy die App installieren, die ganze Nachricht kopieren und die App öffnen: ' +
-      'Sie trägt das Thema selbst ein, dort nur noch auf „Verbinden“ tippen.';
-    v.append(el('div', { class: 'card' },
+    const byMessage = 'Am anderen Handy die App installieren, die ganze Nachricht kopieren, die App öffnen und auf ' +
+      '„Eigenen Radar verbinden“ tippen: Sie trägt das Thema selbst ein, dort nur noch auf „Verbinden“ tippen.';
+    if (st.public) v.append(recommendCard());
+    else v.append(el('div', { class: 'card' },
       el('h3', { text: 'Weitere Handys' }),
       el('p', { class: 'small muted', text: 'Die App läuft auf beliebig vielen Handys. ' + (st.appFile
         ? 'Am einfachsten gibst du sie als Datei weiter, die dein Thema schon enthält. Am anderen Handy die Datei antippen, ' +
@@ -747,13 +807,17 @@
     v.append(el('div', { class: 'card' },
       el('h3', { text: 'App' }),
       el('div', { class: 'kv-plain' }, el('span', { text: 'Version' }), el('span', { text: st.version + (st.debug ? ' (Testbau)' : '') })),
-      u.available ? note('info', 'info', 'Eine neue Version ist da. Nach dem Herunterladen die Datei antippen und „Aktualisieren“ wählen. Thema und Einstellungen bleiben erhalten.') : null,
+      st.play ? el('p', { class: 'small muted', text: 'Neue Versionen kommen über den Play Store.' }) : null,
+      u.available ? note('info', 'info', 'Eine neue Version ist da. Nach dem Herunterladen die Datei antippen und „Aktualisieren“ wählen. ' +
+        (st.public ? 'Die Einstellungen bleiben erhalten.' : 'Thema und Einstellungen bleiben erhalten.')) : null,
       el('div', { class: 'stack' },
-        u.available
+        st.play ? null : u.available
           ? el('button', { class: 'btn primary', onclick: () => N.downloadUpdate() }, 'Neue Version herunterladen')
           : el('button', { class: 'btn', onclick: () => { N.checkUpdate(); toast('Suche nach neuer Version …'); } }, 'Nach neuer Version suchen'),
         el('button', { class: 'btn', onclick: () => N.openUrl(statusUrl()) }, 'Lagebericht bei GitHub', icon('ext')),
-        el('button', { class: 'btn danger', onclick: askReset }, 'Thema ändern'))));
+        st.public ? el('button', { class: 'btn', onclick: askOwn }, 'Eigenen Radar verbinden') : null,
+        el('button', { class: 'btn danger', onclick: st.public ? askOff : askReset }, st.public ? 'Alarm ausschalten' : 'Thema ändern')),
+      legalLinks()));
 
     v.append(el('div', { class: 'foot', text: 'ntfy.sh hebt Meldungen 12 Stunden auf. War das Handy länger ohne Netz, fehlen ältere Meldungen hier. Der Lagebericht zeigt trotzdem den aktuellen Stand.' }));
   }
@@ -775,19 +839,63 @@
     toast('Probealarm geschickt.');
   }
 
+  /** Vergisst das Ziel und die Meldungen. Danach steht die Seite [page] offen: 'welcome' oder 'private'. */
+  function forget(page) {
+    S.setup = { busy: false, error: '', result: null, value: '', fromLink: false };
+    S.page = page;
+    N.resetTopic();
+    refresh();
+  }
+
   function askReset() {
     S.modal = {
       title: 'Thema ändern?',
       text: 'Die App vergisst das bisherige Thema und die gespeicherten Meldungen. Danach gibst du das neue Thema ein.',
       ok: 'Thema ändern',
       danger: true,
-      onOk: () => {
-        S.setup = { busy: false, error: '', result: null, value: '', fromLink: false };
-        N.resetTopic();
-        refresh();
-      },
+      onOk: () => forget('private'),
     };
     renderModal();
+  }
+
+  function askOff() {
+    S.modal = {
+      title: 'Alarm ausschalten?',
+      text: 'Die App meldet sich dann nicht mehr und vergisst die gespeicherten Meldungen. Einschalten kannst du den Alarm jederzeit wieder.',
+      ok: 'Ausschalten',
+      danger: true,
+      onOk: () => forget('welcome'),
+    };
+    renderModal();
+  }
+
+  /** Vom öffentlichen Alarm zum eigenen Radar: für Leute, die selbst einen Blackout-Radar betreiben. */
+  function askOwn() {
+    S.modal = {
+      title: 'Eigenen Radar verbinden?',
+      text: 'Das ist für Leute, die selbst einen Blackout-Radar betreiben. Der öffentliche Alarm wird ausgeschaltet, ' +
+        'danach trägst du das Thema deines Radars ein.',
+      ok: 'Weiter',
+      onOk: () => forget('private'),
+    };
+    renderModal();
+  }
+
+  /** Die App weiterempfehlen. Ein Thema gibt es beim öffentlichen Alarm nicht weiterzugeben. */
+  function recommendCard() {
+    return el('div', { class: 'card' },
+      el('h3', { text: 'App empfehlen' }),
+      el('p', { class: 'small muted', text: 'Ein Alarm hilft am meisten, wenn ihn viele bekommen: Familie, Nachbarn, Kollegen. ' +
+        'Die App ist kostenlos und braucht keine Anmeldung.' }),
+      el('div', { class: 'stack' },
+        el('button', { id: 'recommend', class: 'btn primary', onclick: () => N.recommend() }, icon('share'), 'App empfehlen')));
+  }
+
+  /** Verweise auf Datenschutz und Impressum. Beide Texte liegen in der App und öffnen sich ohne Netz. */
+  function legalLinks() {
+    return el('div', { class: 'legal-links' },
+      el('button', { class: 'link-btn', onclick: () => openLegal('datenschutz') }, 'Datenschutz'),
+      el('button', { class: 'link-btn', onclick: () => openLegal('impressum') }, 'Impressum'));
   }
 
   // -------------------------------------------------------------- Einrichten
@@ -803,7 +911,82 @@
       window.scrollTo(0, 0);
     }
     const r = S.setup.result;
-    if (r) { renderResult(root, r); return; }
+    // Läuft gerade ein Einrichten, bleibt die Seite stehen, von der aus es gestartet wurde.
+    const page = r ? 'result' : (S.setup.busy ? (S.setup.public ? 'welcome' : 'private') : S.page);
+    if (root.getAttribute('data-page') !== page) {
+      root.textContent = '';
+      root.setAttribute('data-page', page);
+      window.scrollTo(0, 0);
+      // In die Zwischenablage sieht die App nur, solange die Seite zum Verbinden des eigenen Radars offen ist.
+      N.setupOpen(page === 'private');
+    }
+    if (r) renderResult(root, r);
+    else if (page === 'private') renderPrivate(root);
+    else renderWelcome(root);
+    armBack();
+  }
+
+  /** Die erste Seite: den öffentlichen Alarm einschalten. Ein Tipp, einzugeben ist nichts. */
+  function renderWelcome(root) {
+    if (!document.getElementById('enable')) {
+      root.textContent = '';
+      const point = (ico, title, text) => el('li', null, icon(ico), el('div', null, el('b', { text: title }), el('span', { text: text })));
+      root.append(
+        el('div', { class: 'brand-big', html: LOGO_BIG },
+          el('div', null, el('b', { text: 'Blackout-Radar' }),
+            brandName() ? el('span', { class: 'by', text: 'von ' + brandName() }) : null)),
+        el('h2', { text: 'Alarm bei großem Stromausfall' }),
+        el('p', { class: 'lead', text: 'Fällt in Österreich großflächig der Strom aus, meldet sich dein Handy. ' +
+          'Kostenlos und ohne Anmeldung.' }),
+        el('ul', { class: 'points' },
+          point('zap', 'Laut, auch bei Lautlos', 'Der Alarm läutet über die Wecker-Lautstärke, auch nachts.'),
+          point('lage', 'Lagebericht in der App', 'Wo der Strom fehlt, seit wann und wie viele betroffen sind.'),
+          point('shield', 'Ohne Konto, ohne Standort', 'Die App fragt nichts ab und verfolgt nichts.')),
+        el('button', { id: 'enable', class: 'btn primary block big', onclick: enablePublic }, 'Alarm einschalten'),
+        el('div', { id: 'setup-msg', class: 'msg-line' }),
+        el('button', { id: 'own', class: 'link-btn block', onclick: openPrivate }, 'Eigenen Radar verbinden'),
+        el('p', { class: 'fine', text: 'Der Blackout-Radar ist kein amtlicher Warndienst. Er wertet öffentliche Messdaten aus und kann ' +
+          'sich irren oder ausfallen. Für Alarme braucht das Handy Internet.' }),
+        legalLinks());
+    }
+    updateWelcome();
+  }
+
+  function updateWelcome() {
+    const btn = document.getElementById('enable');
+    const msg = document.getElementById('setup-msg');
+    if (!btn || !msg) return;
+    const busy = S.setup.busy;
+    btn.disabled = busy;
+    btn.textContent = busy ? 'Schalte ein …' : 'Alarm einschalten';
+    document.getElementById('own').disabled = busy;
+    msg.className = 'msg-line ' + (S.setup.error ? 'error' : 'info');
+    msg.textContent = S.setup.error || '';
+  }
+
+  function enablePublic() {
+    if (S.setup.busy) return;
+    S.setup = { busy: true, error: '', result: null, value: '', fromLink: false, public: true };
+    updateWelcome();
+    N.enablePublic();
+  }
+
+  function openPrivate() {
+    if (S.setup.busy) return;
+    S.setup = { busy: false, error: '', result: null, value: '', fromLink: false };
+    S.page = 'private';
+    render();
+  }
+
+  function closePrivate() {
+    if (!canLeavePrivate()) return;
+    S.setup = { busy: false, error: '', result: null, value: '', fromLink: false };
+    S.page = 'welcome';
+    render();
+  }
+
+  /** Für Leute mit eigenem Radar: das Thema eintragen, an das ihr Radar seine Meldungen schickt. */
+  function renderPrivate(root) {
     let input = document.getElementById('topic');
     if (!input) {
       root.textContent = '';
@@ -816,6 +999,7 @@
       input.value = S.setup.value;
       // add() lässt aus, was fehlt (den Knopf zur Installationsdatei). root.append() schriebe dafür das Wort "null" in die Seite.
       add(root, [
+        el('button', { id: 'back', class: 'link-btn back', onclick: closePrivate }, icon('back'), 'Zurück'),
         el('div', { class: 'brand-big', html: LOGO_BIG }, el('b', { text: 'Blackout-Radar' })),
         el('h2', { text: 'Alarme auf dieses Handy holen' }),
         el('p', { class: 'lead', text: 'Trag das ntfy-Thema ein, an das der Radar seine Meldungen schickt. ' +
@@ -853,6 +1037,7 @@
     btn.disabled = busy || !input.value.trim();
     btn.textContent = busy ? 'Verbinde …' : 'Verbinden';
     document.getElementById('paste').disabled = busy;
+    document.getElementById('back').disabled = busy;
     const builtIn = document.getElementById('builtin');
     if (builtIn) builtIn.disabled = busy;
     msg.className = 'msg-line ' + (S.setup.error ? 'error' : 'info');
@@ -878,7 +1063,17 @@
     root.textContent = '';
     const now = Date.now();
     let kind, title, text;
-    if (r.offline) {
+    if (r.public) {
+      // Der öffentliche Alarm: Hier gibt es kein Thema, das falsch sein könnte.
+      kind = r.offline ? 'info' : 'ok';
+      title = 'Alarm ist eingeschaltet';
+      const newest = S.msgs[0];
+      text = r.offline
+        ? 'Der Server war gerade nicht erreichbar. Die App verbindet sich von selbst, sobald das Netz da ist.'
+        : 'Ab jetzt meldet sich dein Handy, sobald der Radar einen großen Stromausfall erkennt.' +
+          (r.count > 0 && newest ? ' Die letzte Meldung: „' + newest.title + '“ (' + when(newest.time * 1000, now) + ').' : '') +
+          ' Jeden Morgen um 7 Uhr kommt eine leise Übersicht.';
+    } else if (r.offline) {
       kind = 'info';
       title = 'Gespeichert';
       text = 'ntfy.sh war gerade nicht erreichbar. Die App verbindet sich von selbst, sobald das Netz da ist, ' +
@@ -908,6 +1103,8 @@
       el('h2', { text: title }),
       el('p', { class: 'lead', text: text }),
       S.setup.fromFile ? el('p', { class: 'small muted', text: 'Das Thema stand schon in der Installationsdatei. Eingeben musstest du nichts.' }) : null,
+      // Wer den Dienst bereitstellt, in dem Augenblick, in dem er zum ersten Mal etwas leistet.
+      r.public && brandName() ? el('p', { class: 'small muted', text: 'Diesen Dienst stellt dir ' + brandName() + ' kostenlos bereit.' }) : null,
       S.st.perms.notifications && S.st.perms.battery ? null :
         el('p', { class: 'small muted', text: 'Gleich fragt Android nach zwei Erlaubnissen: Benachrichtigungen zeigen und im Hintergrund laufen. ' +
           'Bitte beide erlauben, sonst kommen Alarme nicht oder zu spät.' }),
@@ -915,6 +1112,7 @@
         el('button', { class: 'btn primary block', onclick: finishSetup }, kind === 'warn' ? 'Passt so, weiter' : 'Weiter'),
         kind === 'warn' ? el('button', { class: 'btn block', onclick: () => {
           S.setup = { busy: false, error: '', result: null, value: S.setup.value, fromLink: false };
+          S.page = 'private';
           N.resetTopic();
           refresh();
         } }, 'Anderes Thema eingeben') : null)));
@@ -922,9 +1120,166 @@
 
   function finishSetup() {
     S.setup = { busy: false, error: '', result: null, value: '', fromLink: false };
+    S.page = 'welcome';
     S.tab = 'lage';
     render();
     window.scrollTo(0, 0);
+  }
+
+  // ---------------------------------------------------------------- Über uns
+
+  /** Wer die App anbietet. Das steht in einem eigenen Bereich, nie zwischen Lage und Meldungen. */
+  function renderFirma(v) {
+    if (v.firstChild) return;  // der Inhalt ändert sich nicht, solange die App läuft
+    const b = S.st.brand || {};
+    const service = text => el('li', { text: text });
+    v.append(
+      el('div', { class: 'firma-hero' },
+        el('div', { class: 'firma-logo', html: LOGO_BIG }),
+        el('div', null,
+          el('h2', { text: b.name || '' }),
+          el('p', { class: 'claim', text: 'Wir vernetzen Sie!' }),
+          el('p', { class: 'sub', text: 'IT aus Tragwein im Mühlviertel, seit 2014.' }),
+          el('button', { id: 'firma-web-top', class: 'btn light', onclick: () => N.openUrl(b.web) }, (b.web || '').replace(/^https?:\/\//, ''), icon('ext')))),
+
+      el('div', { class: 'card' },
+        el('h3', { text: 'Warum es diese App gibt' }),
+        el('p', { class: 'small', text: 'Fällt der Strom aus, fällt zuerst die Technik aus: Internet, Telefon, Kameras, Heizungssteuerung. ' +
+          'Mit genau dieser Technik arbeiten wir jeden Tag. Den Blackout-Radar haben wir für den eigenen Betrieb gebaut ' +
+          'und stellen ihn allen kostenlos zur Verfügung.' })),
+
+      // Das eine Angebot, das zum Anlass der App passt. Sachlich, ohne Versprechen zur Dauer.
+      el('div', { class: 'card' },
+        el('h3', { text: 'Damit Ihre Technik weiterläuft' }),
+        el('p', { class: 'small', text: 'Eine USV (unterbrechungsfreie Stromversorgung) versorgt Ihre wichtigste Technik aus dem Akku weiter, ' +
+          'wenn der Strom ausfällt. So bleiben Sie erreichbar und behalten den Überblick.' }),
+        el('ul', { class: 'services' },
+          service('Internet'),
+          service('Netzwerk'),
+          service('WLAN'),
+          service('Kameras'),
+          service('Telefonanlage')),
+        el('p', { class: 'small muted', text: 'Wie lange die Technik durchhält, hängt von der Auslegung ab. Wir beraten Sie, was bei Ihnen sinnvoll ist.' }),
+        el('div', { class: 'stack' },
+          el('button', { id: 'firma-usv', class: 'btn primary', onclick: () => b.mail ? N.mailCompany('usv') : N.openUrl(b.contact) },
+            icon('zap'), 'USV-Beratung anfragen'))),
+
+      el('div', { class: 'card' },
+        el('h3', { text: 'Was wir machen' }),
+        el('ul', { class: 'services' },
+          service('Internetanbindungen'),
+          service('Netzwerke und Infrastruktur'),
+          service('WLAN und Hotspots'),
+          service('Telefonanlagen'),
+          service('Überwachungssysteme'),
+          service('Smart Home'),
+          service('Service und IT-Handel')),
+        el('p', { class: 'small muted', text: 'Ihr Partner in Sachen Netzwerk, Telefon, Überwachung, Smart Home und Internet. Wir beraten Sie gerne!' })),
+
+      el('div', { class: 'card' },
+        el('h3', { text: 'Kontakt' }),
+        el('div', { class: 'stack first' },
+          el('button', { id: 'firma-web', class: 'btn primary', onclick: () => N.openUrl(b.web) }, icon('globe'), 'Zur Homepage'),
+          el('button', { id: 'firma-call', class: 'btn', onclick: () => N.callCompany() }, icon('call'), 'Anrufen: ' + b.phone),
+          b.mail ? el('button', { id: 'firma-mail', class: 'btn', onclick: () => N.mailCompany('') }, icon('mail'), 'E-Mail schreiben')
+            : el('button', { id: 'firma-contact', class: 'btn', onclick: () => N.openUrl(b.contact) }, icon('mail'), 'Nachricht schreiben')),
+        el('p', { class: 'small muted hours' }, icon('clock', 'sm'),
+          el('span', { text: 'Bürozeiten: Montag bis Donnerstag 9 bis 16 Uhr, Freitag 9 bis 12 Uhr.' }))),
+
+      recommendCard(),
+
+      el('div', { class: 'card' },
+        el('h3', { text: 'Gut zu wissen' }),
+        el('ul', { class: 'plain' },
+          el('li', { text: 'Der Blackout-Radar ist kein amtlicher Warndienst und ersetzt keine Warnung der Behörden. Er wertet öffentliche ' +
+            'Messdaten aus und kann sich irren oder ausfallen.' }),
+          el('li', { text: 'Alarme brauchen Internet am Handy. Bei einem langen Stromausfall fällt auch das Mobilfunknetz nach einiger Zeit aus.' }),
+          el('li', null, 'Der Quelltext von Radar und App ist offen: ',
+            el('a', { href: '#', onclick: e => { e.preventDefault(); N.openUrl('https://github.com/' + S.st.repo); } }, 'bei GitHub ansehen'), '.')),
+        legalLinks()));
+  }
+
+  // ------------------------------------------------- Impressum und Datenschutz
+
+  function openLegal(name) {
+    S.legal = name;
+    renderLegal();
+  }
+
+  function closeLegal() {
+    S.legal = null;
+    renderLegal();
+  }
+
+  /** Zeigt Impressum oder Datenschutzerklärung über der Seite. Der Text liegt in der App, es braucht kein Netz. */
+  function renderLegal() {
+    const w = document.getElementById('legal');
+    const name = S.legal;
+    if (!name) {
+      if (w.hasAttribute('data-name')) {
+        w.textContent = '';
+        w.removeAttribute('data-name');
+        w.classList.remove('show');
+        document.body.classList.remove('legal-open');
+      }
+      armBack();
+      return;
+    }
+    if (w.getAttribute('data-name') !== name) {
+      w.textContent = '';
+      w.setAttribute('data-name', name);
+      const body = el('div', { class: 'legal-body' });
+      const text = N.legal(name);
+      if (text) renderDoc(body, text);
+      else body.append(el('p', { text: 'Der Text ließ sich nicht laden. Er steht auch im Netz.' }));
+      const url = (S.st.legal || {})[name === 'impressum' ? 'imprint' : 'privacy'];
+      add(w, [
+        el('header', { class: 'top' },
+          el('button', { class: 'icon-btn', 'aria-label': 'Zurück', onclick: closeLegal }, icon('back')),
+          el('h1', { text: LEGAL_TITLE[name] || '' })),
+        body,
+        url ? el('div', { class: 'foot' },
+          el('div', { text: 'Derselbe Text steht öffentlich im Netz.' }),
+          el('button', { onclick: () => N.openUrl(url) }, 'Im Browser öffnen')) : null]);
+      w.classList.add('show');
+      document.body.classList.add('legal-open');
+      w.scrollTop = 0;
+    }
+    armBack();
+  }
+
+  /** Setzt einen Text in Markdown um: Überschriften, Absätze, Listen, Fett und Verweise. Mehr brauchen die Rechtstexte nicht. */
+  function renderDoc(root, md) {
+    const lines = md.replace(/\r/g, '').split('\n');
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const head = /^(#{1,3}) +(.*)$/.exec(line);
+      if (head) {
+        root.append(el('h' + (head[1].length + 1), null, inline(head[2].trim())));
+        i++;
+        continue;
+      }
+      if (/^- /.test(line)) {
+        const ul = el('ul');
+        while (i < lines.length && /^- /.test(lines[i])) ul.append(el('li', null, inline(lines[i++].slice(2))));
+        root.append(ul);
+        continue;
+      }
+      if (!line.trim()) { i++; continue; }
+      // Absatz: Zeilen, die mit zwei Leerzeichen enden, behalten ihren Umbruch (Anschriften).
+      const para = el('p');
+      let br = false;
+      let first = true;
+      while (i < lines.length && lines[i].trim() && !/^(#{1,3} |- )/.test(lines[i])) {
+        const raw = lines[i++];
+        if (!first) para.append(br ? el('br') : document.createTextNode(' '));
+        add(para, inline(raw.trim()));
+        br = / {2}$/.test(raw);
+        first = false;
+      }
+      root.append(para);
+    }
   }
 
   // ------------------------------------------------------------------ Dialog
@@ -934,7 +1289,7 @@
     w.textContent = '';
     const m = S.modal;
     w.classList.toggle('show', !!m);
-    if (!m) return;
+    if (!m) { armBack(); return; }
     const box = el('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true' },
       el('h3', { text: m.title }),
       el('p', { text: m.text }),
@@ -947,6 +1302,7 @@
     box.addEventListener('click', e => e.stopPropagation());
     w.onclick = closeModal;
     w.append(box);
+    armBack();
   }
 
   function closeModal() {
@@ -959,14 +1315,18 @@
   window.BR = {
     changed: refresh,
     showTab(name) {
-      if (['lage', 'meldungen', 'app'].indexOf(name) < 0) return;
+      if (TABS.indexOf(name) < 0) return;
+      S.legal = null;
       // Ein Tipp auf eine Benachrichtigung beendet auch die Erfolgsseite nach dem Einrichten.
       if (S.setup.result && S.st && S.st.hasTopic) { S.setup.result = null; S.tab = name; render(); return; }
+      renderLegal();
       showTab(name);
     },
     back() {
       if (S.modal) { closeModal(); return true; }
+      if (S.legal) { closeLegal(); return true; }
       if (S.shell && S.tab !== 'lage') { showTab('lage'); return true; }
+      if (!S.shell && canLeavePrivate()) { closePrivate(); return true; }
       return false;
     },
     onPaste(text) {
@@ -1002,6 +1362,8 @@
       if (result.ok) S.setup.result = result;
       else S.setup.error = result.error || 'Das hat nicht geklappt.';
       refresh();
+      // Die Seite, von der aus eingerichtet wurde, zeigt die Fehlermeldung selbst.
+      updateWelcome();
     },
     onUpdateChecked(ok) {
       refresh();
@@ -1019,6 +1381,8 @@
         if (fromFile && (S.setup.busy || S.setup.result)) return;
         // Noch nichts eingerichtet: gleich verbinden, so wie nach einem Tipp auf "Verbinden".
         S.setup = { busy: false, error: '', result: null, value: topic, fromLink: !fromFile, fromFile: !!fromFile };
+        S.page = 'private';
+        S.legal = null;
         const input = document.getElementById('topic');
         if (input) input.value = topic;
         render();
@@ -1028,10 +1392,13 @@
       S.modal = {
         title: 'Neues Thema übernehmen?',
         text: (fromFile ? 'Die Installationsdatei bringt ein anderes Thema mit (' : 'Der Link enthält ein anderes Thema (') + masked + '). ' +
-          'Bisher: ' + S.st.topic + '. Die App vergisst dann das bisherige Thema und die gespeicherten Meldungen.',
+          (S.st.public ? 'Bisher ist der öffentliche Alarm eingeschaltet. Die App schaltet ihn dann aus und vergisst die gespeicherten Meldungen.'
+            : 'Bisher: ' + S.st.topic + '. Die App vergisst dann das bisherige Thema und die gespeicherten Meldungen.'),
         ok: 'Übernehmen',
         onOk: () => {
           S.setup = { busy: true, error: '', result: null, value: topic, fromLink: !fromFile, fromFile: !!fromFile };
+          S.page = 'private';
+          S.legal = null;
           render();
           N.setTopic(topic);
         },
@@ -1045,7 +1412,7 @@
   };
 
   // Zeiten wie "vor 3 min" und der Countdown bis zum nächsten Versuch bleiben aktuell.
-  setInterval(() => { if (S.st && S.shell && S.tab !== 'meldungen') renderMain(); }, 20000);
+  setInterval(() => { if (S.st && S.shell && S.tab !== 'meldungen' && S.tab !== 'firma') renderMain(); }, 20000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 
   refresh();

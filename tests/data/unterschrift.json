@@ -10,7 +10,14 @@
    "title": "Blackout: Österreich",
    "click": "https://example.org/status",
    "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEUCIQD1krOMgJaBmV0iBCDkch8M3CPJuLt0UK4V01hT5qUpjgIgMyF9_G8TI41JJ4J6pLGOxPe31kiY-y4SywQnp4L7NnM",
-   "valid": true
+   "valid": true,
+   "expect": {
+    "k": "test",
+    "t": 1795690800,
+    "l": "alarm",
+    "i": "AT-20261126T1100:start:1",
+    "body": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)"
+   }
   },
   {
    "name": "gültig, ohne Link",
@@ -18,7 +25,14 @@
    "title": "Blackout: Österreich",
    "click": "",
    "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEQCIGs42aOeRi3lI_S88lRdMFHA0ruz4wWOGWJk3n4nqebOAiBhdODfurqfcK9cbUBlJTgDzG8TNQikpGu_0TaLc9uZdA",
-   "valid": true
+   "valid": true,
+   "expect": {
+    "k": "test",
+    "t": 1795690800,
+    "l": "alarm",
+    "i": "AT-20261126T1100:start:1",
+    "body": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)"
+   }
   },
   {
    "name": "gültig, ohne Text",
@@ -26,7 +40,14 @@
    "title": "Blackout: Österreich",
    "click": "https://example.org/status",
    "message": "br1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEQCIHIvbbAC4CsXSRc4o2jDnniCUjQn4s3IoNfzWIwaQKOXAiBJCJn0RswKMryB0fUCXZmVuxv15th-Ihn1HOwdhR4fWA",
-   "valid": true
+   "valid": true,
+   "expect": {
+    "k": "test",
+    "t": 1795690800,
+    "l": "alarm",
+    "i": "AT-20261126T1100:start:1",
+    "body": ""
+   }
   },
   {
    "name": "gültig, verspätet zugestellt",
@@ -34,7 +55,14 @@
    "title": "Blackout: Österreich",
    "click": "https://example.org/status",
    "message": "Verspätet zugestellt, erstellt am 26.11. 12:00 Uhr.\nSeit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEQCICDtTJtfAhQn2X10rmRu6wxnNy6mLUnheNL26wf_IPqeAiA567fsEu-jL1hn5_J0bbPMAVaS_dH5obcMon7QZgiVzw",
-   "valid": true
+   "valid": true,
+   "expect": {
+    "k": "test",
+    "t": 1795690800,
+    "l": "alarm",
+    "i": "AT-20261126T1100:start:1",
+    "body": "Verspätet zugestellt, erstellt am 26.11. 12:00 Uhr.\nSeit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)"
+   }
   },
   {
    "name": "gültig, tägliche Übersicht",
@@ -42,7 +70,14 @@
    "title": "Lagebericht 26.11.: keine größeren Stromausfälle",
    "click": "https://example.org/status",
    "message": "Datenquellen: alle 4 in Ordnung.\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJkYWlseSIsImkiOiJkYWlseToyMDI2LTExLTI2In0.MEQCIFkcrc6Q1gMEbPmbZDneAonzUEHiED-gJhm3PXlWvI-zAiBpB_7ewlKExuFiLn8Wkoznx5_HJKpwjguQJNoV5OXuig",
-   "valid": true
+   "valid": true,
+   "expect": {
+    "k": "test",
+    "t": 1795690800,
+    "l": "daily",
+    "i": "daily:2026-11-26",
+    "body": "Datenquellen: alle 4 in Ordnung."
+   }
   },
   {
    "name": "gültig, zweite Form derselben Unterschrift",
@@ -50,7 +85,14 @@
    "title": "Blackout: Österreich",
    "click": "https://example.org/status",
    "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEYCIQD1krOMgJaBmV0iBCDkch8M3CPJuLt0UK4V01hT5qUpjgIhAMzeggKQ7Nxztth9hVtOcTrFLyRlDhxwcii1oxt5Z-7e",
-   "valid": true
+   "valid": true,
+   "expect": {
+    "k": "test",
+    "t": 1795690800,
+    "l": "alarm",
+    "i": "AT-20261126T1100:start:1",
+    "body": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)"
+   }
   },
   {
    "name": "gültig, Zeile im Text zählt nicht",
@@ -58,7 +100,75 @@
    "title": "Blackout: Österreich",
    "click": "https://example.org/status",
    "message": "Zitat:\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEUCIQD1krOMgJaBmV0iBCDkch8M3CPJuLt0UK4V01hT5qUpjgIgMyF9_G8TI41JJ4J6pLGOxPe31kiY-y4SywQnp4L7NnM\nEnde\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJpbmZvIiwiaSI6IkFULTIwMjYxMTI2VDExMDA6c3RhcnQ6MSJ9.MEQCIFcUXlJO58XfqH9X9YyMAl88CkS5ewx8N3yo_1qNWcImAiAFzcZzU4hsw0XSJb9JoDcU_a6zzjDI93A2QTC57q-h5A",
-   "valid": true
+   "valid": true,
+   "expect": {
+    "k": "test",
+    "t": 1795690800,
+    "l": "info",
+    "i": "AT-20261126T1100:start:1",
+    "body": "Zitat:\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEUCIQD1krOMgJaBmV0iBCDkch8M3CPJuLt0UK4V01hT5qUpjgIgMyF9_G8TI41JJ4J6pLGOxPe31kiY-y4SywQnp4L7NnM\nEnde"
+   }
+  },
+  {
+   "name": "gültig, Leerzeilen vor der Unterschrift",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\n\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEUCIQD1krOMgJaBmV0iBCDkch8M3CPJuLt0UK4V01hT5qUpjgIgMyF9_G8TI41JJ4J6pLGOxPe31kiY-y4SywQnp4L7NnM",
+   "valid": true,
+   "expect": {
+    "k": "test",
+    "t": 1795690800,
+    "l": "alarm",
+    "i": "AT-20261126T1100:start:1",
+    "body": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)"
+   }
+  },
+  {
+   "name": "gültig, Fragezeichen im Text",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Lage unklar ? Näheres folgt\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEQCICcyuj2EOieHSv38fD1zaEqbi_AOhQJEvBzcyq1rfliGAiBDr2fbrwe6P5t6E7W7wYQba0xNIDa_ZXE4E4bQkPrgDg",
+   "valid": true,
+   "expect": {
+    "k": "test",
+    "t": 1795690800,
+    "l": "alarm",
+    "i": "AT-20261126T1100:start:1",
+    "body": "Lage unklar ? Näheres folgt"
+   }
+  },
+  {
+   "name": "gültig, Angaben in anderer Reihenfolge und mit Leerzeichen",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.ewogImkiOiAiQVQtMjAyNjExMjZUMTEwMDpzdGFydDoxIiwKICJsIjogImFsYXJtIiwKICJ0IjogMTc5NTY5MDgwMCwKICJrIjogInRlc3QiCn0.MEQCIFwHMIpajVNZxr9iyQdsHjFN1WrXHzoYIzZ-vy8RcawDAiA-pRDvd0SUDWWPkQGiwzQw9St6ioTo4LadqAS-EcaS-Q",
+   "valid": true,
+   "expect": {
+    "k": "test",
+    "t": 1795690800,
+    "l": "alarm",
+    "i": "AT-20261126T1100:start:1",
+    "body": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)"
+   }
+  },
+  {
+   "name": "gültig, zusätzliche Angabe",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEiLCJuZXUiOiJzcMOkdGVyIn0.MEQCIFD2jLRbl2v8GRAOIQ9E5aEnpWwgl4CI1x2YHtwG5cZnAiAGKHh8f0EXwSFwf7CVlv129IA15RcdUINn-aGXa4rbQw",
+   "valid": true,
+   "expect": {
+    "k": "test",
+    "t": 1795690800,
+    "l": "alarm",
+    "i": "AT-20261126T1100:start:1",
+    "neu": "später",
+    "body": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)"
+   }
   },
   {
    "name": "Titel geändert",
@@ -117,6 +227,14 @@
    "valid": false
   },
   {
+   "name": "Zeilenenden geändert",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\r\n• Österreich: Stromlast −52 % 🚨\r\n» „Ganz Österreich ohne Strom“ (orf.at)\r\n\r\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEUCIQD1krOMgJaBmV0iBCDkch8M3CPJuLt0UK4V01hT5qUpjgIgMyF9_G8TI41JJ4J6pLGOxPe31kiY-y4SywQnp4L7NnM",
+   "valid": false
+  },
+  {
    "name": "unbekannter Schlüssel",
    "topic": "blackout-radar-alarm",
    "title": "Blackout: Österreich",
@@ -162,6 +280,86 @@
    "title": "Blackout: Österreich",
    "click": "https://example.org/status",
    "message": "br1.x.y",
+   "valid": false
+  },
+  {
+   "name": "Zeit als Text",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOiIxNzk1NjkwODAwIiwibCI6ImFsYXJtIiwiaSI6IkFULTIwMjYxMTI2VDExMDA6c3RhcnQ6MSJ9.MEUCIQC3L0zzTJ1k7i4CNfH-uAj3Dd9BZwNh3VTH2ItWjv93fAIgAJq2QPEht8IGsPbXjLkE1pMwAw-8PbIUDKV8UkCl-G8",
+   "valid": false
+  },
+  {
+   "name": "Zeit als Kommazahl",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAuNSwibCI6ImFsYXJtIiwiaSI6IkFULTIwMjYxMTI2VDExMDA6c3RhcnQ6MSJ9.MEUCIQCM7EqiMHypOxdnDRfR-xIgJEJRw3jSN8YwiGt5KxsIiAIgJRm3oNTwyb-JZLsslWxwOnv3ZeJW8VvsIyqd6D4Ddd0",
+   "valid": false
+  },
+  {
+   "name": "Zeit als Wahrheitswert",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOnRydWUsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEUCIQCZb_jGytxhViYgnjzXIX46NIqPkZVrKrJUTMRF9RBe3AIgeHCinyqYPTGcm8BMvHFo88p4dndpu-EVkLbH3XFtSqU",
+   "valid": false
+  },
+  {
+   "name": "Zeit negativ",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOi0xLCJsIjoiYWxhcm0iLCJpIjoiQVQtMjAyNjExMjZUMTEwMDpzdGFydDoxIn0.MEUCIQC6KYPl9yX0gv-7EAfaBf-uwua3Z8rBl0rZ9KAPtlBDHwIgYQX-o2P90fyTDZOcp1il6y0zkp68ziVxtxVoQBA_63U",
+   "valid": false
+  },
+  {
+   "name": "Zeit zu groß",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOjkwMDcxOTkyNTQ3NDA5OTIsImwiOiJhbGFybSIsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEQCIA8EeLYqLDqkQxmA7wjC0KHExV0jaSayleOkRJYxe7TyAiB83xIp6YDvhVpKoOaUxPaZRYaCkuffp--hiEbxRtuygA",
+   "valid": false
+  },
+  {
+   "name": "Zeit fehlt",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjogInRlc3QiLCAibCI6ICJhbGFybSIsICJpIjogIkFULTIwMjYxMTI2VDExMDA6c3RhcnQ6MSJ9.MEUCIQDRyb3kuGU9uK-wgutnW5LehsB2pgiFdkddfQozR1_1HAIgQ61yyUcVMCNDPOQhpgTIv4FDyLEev0Ffme8SdZIipaY",
+   "valid": false
+  },
+  {
+   "name": "Dringlichkeit als Zahl",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOjUsImkiOiJBVC0yMDI2MTEyNlQxMTAwOnN0YXJ0OjEifQ.MEQCIEkYSQk1zfRIqxWFajjBtsm97ufv76AuJTiQrefBx4IPAiAyBmkqdoLlpaHq3kfpoOugbjaEexi-MIVp366cbLUAig",
+   "valid": false
+  },
+  {
+   "name": "Schlüssel der Meldung fehlt",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjogInRlc3QiLCAidCI6IDE3OTU2OTA4MDAsICJsIjogImFsYXJtIn0.MEUCIQDK9IhzYk-lkrLpYnurY9JF5aEkhigsnvT7OlnxEWnOXgIgXMu-zndck8KJ1SlnfrTxQ7gPeTPCCEttJBXaJcIW-mA",
+   "valid": false
+  },
+  {
+   "name": "Schlüssel der Meldung ist null",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.eyJrIjoidGVzdCIsInQiOjE3OTU2OTA4MDAsImwiOiJhbGFybSIsImkiOm51bGx9.MEUCIQDx72Q11oINzbOXSKO6a9H4jfkjz1LCLxZd6maogRBYMwIga0_i4VNw6E_OoUaNu-MgG5O10389arH6Bg1gtnODBjs",
+   "valid": false
+  },
+  {
+   "name": "Angaben sind eine Liste",
+   "topic": "blackout-radar-alarm",
+   "title": "Blackout: Österreich",
+   "click": "https://example.org/status",
+   "message": "Seit 12:00 Uhr, Dauer bisher 10 min\n• Österreich: Stromlast −52 % 🚨\n» „Ganz Österreich ohne Strom“ (orf.at)\n\nbr1.WyJ0ZXN0IiwgMTc5NTY5MDgwMCwgImFsYXJtIiwgIkFULTIwMjYxMTI2VDExMDA6c3RhcnQ6MSJd.MEUCIQDLEH492R6R2PrpoHW-URkcq8qAn3uTktlp8oRLGpcIdQIgLf-G5YCuLDeoyBT15SbAwF88q5JoC_oNh88vzF-ymro",
    "valid": false
   }
  ]

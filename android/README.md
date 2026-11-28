@@ -93,7 +93,7 @@ Das Thema wirkt wie ein Passwort: Wer es kennt, kann mitlesen und selbst Meldung
 | `test/thema_datei.py` | legt das Thema am Rechner in eine Installationsdatei und liest es heraus, mit eigenem Code. Der Emulator-Test vergleicht damit, was das Handy schreibt |
 | `test/seite.py` | liest im Emulator, was die App gerade anzeigt, und kann Knöpfe drücken (über die Entwickler-Schnittstelle der WebView) |
 | `test/aufbau.js`, `test/fremdtext.js` | laufen in der Seite der App: Sitzt der Rahmen (Kopfzeile, Leiste), und steht irgendwo Text, der nie gewollt ist (ein nacktes „null“ oder „undefined“)? |
-| `test/Vorschau.java` | schreibt die Bildschirmfotos verkleinert ins Protokoll, holt sie dort wieder heraus und vergleicht zwei Bilder |
+| `test/Vorschau.java` | schreibt die Bildschirmfotos verkleinert ins Protokoll, holt sie dort wieder heraus, vergleicht zwei Bilder und sagt, ob ein Bild überhaupt etwas zeigt (nach jedem ersten Start wartet der Emulator-Test darauf, und am Schluss darf kein Bild eine leere Seite zeigen) |
 
 Bauen: `cd android && gradle assembleGithubRelease` (Gradle 8.14, JDK 17, Android SDK 36). Tests: `gradle testGithubDebugUnitTest`. Das Paket für Google Play: `gradle bundlePlayRelease`.
 

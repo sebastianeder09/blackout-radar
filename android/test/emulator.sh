@@ -21,7 +21,9 @@
 #
 # Was die App anzeigt, liest seite.py aus der Seite selbst. Auf jeder Seite, die der Lauf zeigt, sucht
 # fremdtext.js nach Text, der dort nie stehen soll (ein nacktes "null"). Ob das Bild am Handy einer Änderung
-# auch folgt, zeigt der Vergleich zweier Bildschirmfotos (Vorschau.java). Am Ende steht die Frage,
+# auch folgt, zeigt der Vergleich zweier Bildschirmfotos (Vorschau.java). Dasselbe Werkzeug sagt, ob ein
+# Bildschirmfoto überhaupt etwas zeigt: Nach jedem ersten Start wartet der Lauf darauf, und am Schluss darf
+# kein Bild eine leere Seite zeigen. Am Ende steht die Frage,
 # ob die App im Lauf abgestürzt ist, mit einem absichtlichen Absturz des Testbaus als Gegenprobe.
 # Ergebnisse (Bilder, Ablauf, Protokolle) landen in $OUT.
 set -uo pipefail
@@ -54,6 +56,32 @@ quiet_system() {  # Hinweise von Android, dass eine App hängt oder abgestürzt 
 
 snap() { adb exec-out screencap -p > "$OUT/$1.png" && log "Bild $1"; }  # Name: Bild, so wie es gerade ist
 shot() { sleep "${2:-1}"; quiet_system; snap "$1"; }  # Name [Wartezeit]: Bild der App, ohne fremde Hinweise darüber
+
+# Eine Seite kann vollständig in der App stehen, während der Bildschirm noch eine leere Fläche zeigt: Nach dem
+# ersten Start einer frisch installierten App zeichnet der Emulator sie manchmal erst Sekunden später. Was die Seite
+# enthält, liest der Lauf aus der Seite selbst, das merkt er also nicht. Deshalb wartet er nach jedem ersten Start,
+# bis der Bildschirm etwas zeigt, und hält fest, wie lange das gedauert hat. Bleibt der Bildschirm leer, ist das ein
+# Fehler: Wer die App zum ersten Mal öffnet, sähe nichts. Das leere Bild bleibt dann bei den Ergebnissen liegen.
+painted() {  # Stelle [Sekunden]: wartet, bis der Bildschirm Inhalt zeigt
+  local start verdict code
+  start=$(date +%s)
+  while :; do
+    adb exec-out screencap -p > "$OUT/gezeichnet.png"
+    verdict=$(java -Djava.awt.headless=true "$HERE/Vorschau.java" inhalt "$OUT/gezeichnet.png" 2> /dev/null)
+    code=$?
+    if [ "$code" -eq 0 ]; then
+      rm -f "$OUT/gezeichnet.png"
+      log "Gezeichnet, $1: nach $(($(date +%s) - start)) s (${verdict#*: })"
+      return 0
+    fi
+    if [ $(($(date +%s) - start)) -ge "${2:-30}" ]; then
+      mv "$OUT/gezeichnet.png" "$OUT/99-leer-geblieben.png"
+      log "Gezeichnet, $1: nach ${2:-30} s noch nicht (${verdict:-Bild nicht auswertbar})"
+      return 1
+    fi
+    sleep 1
+  done
+}
 
 publish() {  # Titel Priorität Schlagworte Text
   curl -sS --retry 3 -H "Title: $1" -H "Priority: $2" -H "Tags: $3" -d "$4" "$NTFY/$TOPIC" > /dev/null \
@@ -323,6 +351,8 @@ log "Bildschirm: $(adb shell wm size | tr -d '\r' | tr '\n' ' ')$(adb shell wm d
 # ------------------------------------------------------------ Testbau: erste Seite
 adb shell am start -W -n "$DBG/$PKG.MainActivity" > /dev/null
 page_has "$DBG" "Alarm bei großem Stromausfall" && ok "Testbau: Willkommensseite wird angezeigt" || bad "Testbau: Willkommensseite fehlt"
+painted "Testbau, erster Start" && ok "Testbau: Die Seite ist nach dem ersten Start am Bildschirm zu sehen" \
+  || bad "Testbau: Der Bildschirm bleibt nach dem ersten Start leer"
 clean "$DBG" "Testbau: Willkommen"
 shot 00-willkommen
 # Ein weiteres Handy am eigenen Radar einrichten: Die weitergegebene Nachricht liegt in der Zwischenablage, so als
@@ -603,6 +633,8 @@ adb shell am force-stop "$DBG"
 publish "CI Vorab" 3 zap "Diese Meldung lag schon vor dem Einrichten auf dem Thema."
 adb shell am start -W -n "$PKG/.MainActivity" > /dev/null
 page_has "$PKG" "Alarm bei großem Stromausfall" && ok "Fertige App: Willkommensseite beim ersten Öffnen" || bad "Fertige App: Willkommensseite fehlt"
+painted "fertige App, erster Start" && ok "Fertige App: Die Seite ist nach dem ersten Start am Bildschirm zu sehen" \
+  || bad "Fertige App: Der Bildschirm bleibt nach dem ersten Start leer"
 clean "$PKG" "fertige App: Willkommen"
 shot 01a-willkommen
 clip_read "$PKG" && bad "Fertige App: Zwischenablage schon auf der Willkommensseite gelesen ($(clip_note "$PKG"))" \
@@ -966,6 +998,8 @@ adb install -r "$APK_DIR/blackout-radar-play-test.apk" > /dev/null && ok "Play: 
 grant_and_exempt "$PLAY"
 adb shell am start -W -n "$PLAY/$PKG.MainActivity" > /dev/null
 page_has "$PLAY" "Alarm bei großem Stromausfall" && ok "Play: Willkommensseite wird angezeigt" || bad "Play: Willkommensseite fehlt"
+painted "Play, erster Start" && ok "Play: Die Seite ist nach dem ersten Start am Bildschirm zu sehen" \
+  || bad "Play: Der Bildschirm bleibt nach dem ersten Start leer"
 clean "$PLAY" "Play: Willkommen"
 shot 30-play-willkommen
 log "Play: $(debug_in "$PLAY" --es oeffentlich "$ALARM" --es status http://10.0.2.2:8765)"
@@ -1064,6 +1098,15 @@ adb shell wm density reset > /dev/null
 sleep 5
 
 [ -z "$NAMED" ] && ok "Play: keine der $NAMED_PAGES geprüften Seiten nennt GitHub oder ntfy" || bad "Play nennt GitHub oder ntfy auf:$NAMED"
+# Kein Bild des Laufs darf eine leere Fläche zeigen: Dann stand die Seite zwar in der App, war aber nicht zu sehen.
+verdicts=$(java -Djava.awt.headless=true "$HERE/Vorschau.java" inhalt "$OUT"/[0-9]*.png 2> /dev/null)
+pictures=$(find "$OUT" -maxdepth 1 -name '[0-9]*.png' | wc -l)
+shown=$(grep -c ': Inhalt ' <<< "$verdicts")
+if [ "$pictures" -gt 0 ] && [ "$shown" -eq "$pictures" ]; then
+  ok "Alle $pictures Bilder des Laufs zeigen Inhalt, keines eine leere Seite"
+else
+  bad "Bilder ohne Inhalt ($shown von $pictures zeigen etwas): $(grep -v ': Inhalt ' <<< "$verdicts" | tr '\n' ';')"
+fi
 [ -z "$STRAY" ] && ok "Keine der $PAGES geprüften Seiten zeigt Fremdtext wie „null“" || bad "Fremdtext wie „null“ in der Seite:$STRAY"
 
 adb logcat -d > "$OUT/logcat.txt" 2>&1

@@ -47,6 +47,15 @@ import javax.imageio.stream.MemoryCacheImageOutputStream;
  * Alle vier Angaben in Prozent von Breite und Höhe des Bildes. Ein Ausschnitt, der schmaler ist als die
  * Breite beim Schreiben, kommt unverkleinert ins Protokoll, also Bildpunkt für Bildpunkt wie am Handy.
  *
+ * Und die Frage, ob ein Bildschirmfoto überhaupt etwas zeigt. Eine Seite kann vollständig in der App stehen,
+ * während der Bildschirm noch eine leere Fläche zeigt:
+ *
+ *   java android/test/Vorschau.java inhalt <bild>...
+ *
+ * Je Bild eine Zeile mit "Inhalt" oder "leer". Leer heißt: Zwischen den Höhen 8 und 92 % (ohne die Leisten von
+ * Android) weicht fast kein Bildpunkt von der häufigsten Farbe ab. Ende mit 0, wenn jedes Bild Inhalt zeigt,
+ * mit 1, wenn eines leer ist, mit 2, wenn eines nicht lesbar ist.
+ *
  * Braucht nur Java ab Version 11, keine Bibliotheken.
  */
 public class Vorschau {
@@ -65,9 +74,12 @@ public class Vorschau {
         } else if (args.length == 7 && args[0].equals("ausschnitt")) {
             crop(Path.of(args[1]), Path.of(args[2]), Integer.parseInt(args[3]), Integer.parseInt(args[4]),
                     Integer.parseInt(args[5]), Integer.parseInt(args[6]));
+        } else if (args.length >= 2 && args[0].equals("inhalt")) {
+            System.exit(content(Stream.of(args).skip(1).map(Path::of).collect(Collectors.toList())));
         } else {
             System.err.println("Aufruf: Vorschau.java schreiben <ordner> [breite] | lesen <protokoll> <zielordner>"
-                    + " | vergleichen <bild1> <bild2> [von] [bis] | ausschnitt <bild> <ziel> <links> <oben> <breite> <hoehe>");
+                    + " | vergleichen <bild1> <bild2> [von] [bis] | ausschnitt <bild> <ziel> <links> <oben> <breite> <hoehe>"
+                    + " | inhalt <bild>...");
             System.exit(2);
         }
     }
@@ -188,6 +200,63 @@ public class Vorschau {
         double percent = all == 0 ? 0 : 100.0 * different / all;
         out.println(String.format(Locale.GERMAN, "%.1f %% der Bildpunkte anders (Höhe %d bis %d %%)", percent, from, to));
         return percent >= CHANGED_FROM_PERCENT ? 0 : 1;
+    }
+
+    /**
+     * Unter diesem Anteil an Bildpunkten, die von der häufigsten Farbe abweichen, gilt ein Bild als leer. Eine
+     * leere Seite liegt bei 0 %, die Seite mit dem wenigsten Inhalt im Emulator-Test bei rund 4 %.
+     */
+    private static final double CONTENT_FROM_PERCENT = 0.5;
+
+    private static int content(List<Path> images) {
+        PrintStream out = new PrintStream(new FileOutputStream(FileDescriptor.out), true, StandardCharsets.UTF_8);
+        int result = 0;
+        for (Path path : images) {
+            BufferedImage image;
+            try {
+                image = ImageIO.read(path.toFile());
+            } catch (IOException e) {
+                image = null;
+            }
+            if (image == null) {
+                out.println(path.getFileName() + ": nicht lesbar");
+                result = 2;
+                continue;
+            }
+            double percent = contentPercent(image);
+            boolean empty = percent < CONTENT_FROM_PERCENT;
+            out.println(String.format(Locale.GERMAN, "%s: %s (%.2f %% der Bildpunkte weichen von der häufigsten Farbe ab)",
+                    path.getFileName(), empty ? "leer" : "Inhalt", percent));
+            if (empty && result == 0) result = 1;
+        }
+        return result;
+    }
+
+    /** Anteil der Bildpunkte zwischen den Höhen 8 und 92 %, die nicht die häufigste Farbe des Bildes tragen. */
+    private static double contentPercent(BufferedImage image) {
+        int top = image.getHeight() * 8 / 100;
+        int bottom = image.getHeight() * 92 / 100;
+        // Häufigste Farbe: gezählt in Stufen von 8 je Rot, Grün und Blau, damit leichtes Rauschen nicht stört.
+        int[] counts = new int[1 << 15];
+        for (int y = top; y < bottom; y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int p = image.getRGB(x, y);
+                counts[(p >> 19 & 31) << 10 | (p >> 11 & 31) << 5 | (p >> 3 & 31)]++;
+            }
+        }
+        int most = 0;
+        for (int i = 1; i < counts.length; i++) {
+            if (counts[i] > counts[most]) most = i;
+        }
+        int main = ((most >> 10 & 31) * 8 + 4) << 16 | ((most >> 5 & 31) * 8 + 4) << 8 | ((most & 31) * 8 + 4);
+        long other = 0;
+        for (int y = top; y < bottom; y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                if (distance(image.getRGB(x, y), main) > 48) other++;
+            }
+        }
+        long all = (long) Math.max(0, bottom - top) * image.getWidth();
+        return all == 0 ? 0 : 100.0 * other / all;
     }
 
     /** Abstand zweier Farben als Summe über Rot, Grün und Blau. */

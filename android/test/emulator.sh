@@ -77,6 +77,7 @@ page_has() {  # Paket Text: steht der Text gerade in der Seite der App?
   done
   if [ -s "$OUT/seite-fehler.txt" ]; then
     log "Seite von $1 nicht lesbar: $(tr '\n' ' ' < "$OUT/seite-fehler.txt")"
+    log "Android zuletzt zu $1: $(system_says "$1" | tail -6 | tr '\n' '|')"
   else
     log "Seite von $1 zeigt nicht \"$2\", sondern: $(head -c 300 <<< "$text" | tr '\n' '|')"
   fi
@@ -187,7 +188,30 @@ reports() {  # Paket Datei: Fehlerberichte von Android zu Abstürzen und Hänger
   grep -F -A 25 "Process: $1" "$OUT/$2"
 }
 
-service_running() { adb shell dumpsys activity services "$1/.ListenerService" 2> /dev/null | grep -q "ServiceRecord"; }
+service_running() { adb shell dumpsys activity services "$1/$PKG.ListenerService" 2> /dev/null | grep -q "ServiceRecord"; }  # Paket
+
+wait_restart() {  # Paket Bisheriger-Prozess Sekunden -> Wartezeit in Sekunden, sobald die App in einem neuen Prozess ihren Dienst hält
+  local start pid
+  start=$(date +%s)
+  while [ $(($(date +%s) - start)) -lt "$3" ]; do
+    pid=$(adb shell pidof "$1" 2> /dev/null | tr -d '\r')
+    if [ -n "$pid" ] && [ "$pid" != "$2" ] && service_running "$1"; then
+      echo $(($(date +%s) - start))
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+system_says() {  # Paket [Zeitpunkt am Handy]: was Android über Starten und Beenden dieser App ins Systemprotokoll schrieb
+  local since="-t 4000"
+  [ -n "${2:-}" ] && since="-T '$2'"
+  adb shell "logcat -d -v time $since" 2> /dev/null | tr -d '\r' | grep -F -- "$1" \
+    | { if [ "$1" = "$PKG" ]; then grep -vF -- "$DBG"; else cat; fi; } \
+    | grep -E 'Force stopping|Killing [0-9]+:|Start proc|has died|START u0|Displayed ' \
+    | sed -E -e 's/^[0-9-]+ +([0-9:.]+) +[A-Z]\/[^(]*\( *[0-9]+\): /\1 /' -e "s/${PKG//./\\.}/…/g" | cut -c1-200
+}
 
 chooser() { adb shell dumpsys activity activities 2> /dev/null | grep -q "ChooserActivity"; }  # zeigt Android gerade seine Auswahl zum Weitergeben?
 
@@ -573,8 +597,22 @@ fi
 
 # Über eine vorhandene Installation gespielt, bleibt, was eingerichtet ist. Bringt die Datei ein anderes Thema mit,
 # fragt die App einmal nach und ersetzt nichts von selbst.
+mark=$(adb shell "date '+%m-%d %H:%M:%S.000'" | tr -d '\r')
+old=$(adb shell pidof "$DBG" | tr -d '\r')
 answer=$(adb install -r "$WORK/testbau-anderes.apk" 2>&1) && ok "Datei mit Thema: Android spielt sie über die vorhandene App, die Signatur gilt" \
   || bad "Datei mit Thema: ließ sich nicht über die vorhandene App spielen: $(tail -c 300 <<< "$answer" | tr '\n' ' ')"
+reported=$(adb shell "date '+%H:%M:%S.%N'" | tr -d '\r' | cut -c1-12)
+# Android meldet das Einspielen fertig, bevor es aufgeräumt hat: Gleich danach beendet es noch einmal alles, was zur
+# App gehört ("Force stopping … pkg removed"), auch ein Fenster, das in diesem Augenblick aufgeht. Erst dann erfährt
+# die App vom Update (MY_PACKAGE_REPLACED) und startet ihren Dienst wieder. Darauf wartet der Test, bevor er die App
+# öffnet. Ein Mensch tippt frühestens Sekunden später auf „Öffnen“. Ohne das Warten stand im Lauf 15 auf main
+# (Android 12) statt der Rückfrage der Startbildschirm da, und die App lief nur noch mit ihrem Dienst.
+if t=$(wait_restart "$DBG" "$old" 60); then
+  ok "Testbau: nach dem Update läuft der Dienst von selbst wieder, nach $t s"
+else
+  bad "Testbau: Dienst nach dem Update nicht von selbst wieder gestartet"
+fi
+log "Android zum Update (fertig gemeldet um $reported): $(system_says "$DBG" "$mark" | grep -vE 'START u0|Displayed ' | head -8 | tr '\n' '|')"
 adb shell am start -W -n "$DBG/$PKG.MainActivity" --es tab app > /dev/null
 page_has "$DBG" "Die Installationsdatei bringt ein anderes Thema mit" && ok "Datei mit anderem Thema: App fragt nach, statt das Thema zu ersetzen" \
   || bad "Datei mit anderem Thema: Rückfrage fehlt"
